@@ -11,6 +11,8 @@
     "process:jobs": "tsx src/process-jobs.ts",
     "scan:all": "tsx src/index.ts && tsx src/extract-jobs.ts",
     "scan:full": "tsx src/index.ts && tsx src/extract-jobs.ts",
+    "populate:from": "tsx src/populate-from-addresses.ts",
+    "update:platforms": "tsx src/update-platform-ids.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui"
