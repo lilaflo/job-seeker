@@ -26,7 +26,24 @@ An automation tool that scans Gmail for job-related emails, extracts job descrip
 - ✅ **Skills Database** - Pre-populated with 70 skills from resume across 11 categories (Programming, Cloud, AI, etc.)
 - ✅ **Job-Skill Matching** - Junction table to classify jobs by required skills with relevance scoring
 - ✅ **Match Scoring** - Calculate job compatibility based on skill requirements
-- ✅ **Structured Salary Data** - Track min/max salary ranges with currency and period (yearly/hourly/etc.) for precise filtering
+- ✅ **AI-Powered Salary Extraction** - Uses Ollama LLM to intelligently extract salary information from job pages:
+  - **Primary method**: Ollama analyzes job page text with context-aware extraction
+  - **Fallback method**: Regex patterns for when Ollama is unavailable
+  - **Validation**: Rejects unrealistic values (yearly: 20k-1M, monthly: 1.5k-100k, hourly: 10-500)
+  - Salary ranges: "$80,000 - $120,000", "€60k-€80k", "CHF 100'000 - CHF 120'000"
+  - Single values: "$100,000", "€75k", "£50,000/year"
+  - Multiple currencies: USD, EUR, GBP, CHF with automatic normalization
+  - Multiple formats: US (80,000.50), European (80.000,50), Swiss (80'000)
+  - Period detection: yearly, monthly, weekly, daily, hourly
+  - Smart k-suffix handling: "50-60k" interpreted as "50k-60k"
+  - Better accuracy with complex or unusual salary formats
+- ✅ **Structured Salary Data** - Track min/max salary ranges with currency and period for precise filtering
+- ✅ **Email-Based Job Descriptions** - For non-crawlable platforms (LinkedIn, etc.), uses Ollama to generate structured job descriptions from email content:
+  - **Automatic fallback**: When job page cannot be crawled, analyzes the email notification instead
+  - **Structured format**: Extracts Role Overview, Key Responsibilities, Requirements, Nice to Have, Work Details
+  - **Professional summaries**: AI-generated descriptions under 500 words
+  - **Complete tracking**: All jobs saved with metadata, descriptions added where possible
+  - **Separate statistics**: Shows count of web-scraped vs email-generated descriptions
 - ✅ **Migration System** - Trackable database migrations with automatic version control
 - ✅ **Web Scraping** - Fetches job pages with intelligent content extraction using cheerio
 - ✅ **AI Job Summarization** - Uses Ollama to generate structured job description summaries (Role Overview, Responsibilities, Requirements, etc.)
@@ -34,13 +51,13 @@ An automation tool that scans Gmail for job-related emails, extracts job descrip
 - ✅ **Platform Crawl Control** - Database-driven platform management with configurable crawlability flags and skip reasons
 - ✅ **Smart Filtering** - Automatically skips non-crawlable platforms (e.g., LinkedIn requires multi-level authentication)
 - ✅ **Smart Processing** - Skips jobs that already have descriptions, with rate limiting for respectful scraping
-- ✅ **Comprehensive Unit Tests** - Full test coverage with 156 passing tests using Vitest
+- ✅ **Platform Tracking in Emails** - Each email linked to its source platform (LinkedIn, Indeed, etc.) via foreign key
+- ✅ **Comprehensive Unit Tests** - Full test coverage with 214 passing tests using Vitest
 
 ### Coming Soon
 
 - 🔜 **Skills Matching** - Match job requirements against your skills.md profile
 - 🔜 **Gmail Marking** - Automatically mark matching jobs as important/starred
-- 🔜 **Salary Extraction** - Automatically extract salary information from job descriptions
 
 ## Prerequisites
 
@@ -422,14 +439,34 @@ pnpm build
 11. **Job Title Parsing**: Intelligently extracts job titles from:
     - Email subject lines (with prefix/suffix cleaning)
     - Email body content (as fallback)
-12. **Optional Description Fetching** (if `FETCH_DESCRIPTIONS=true`):
-    - Visits each new job URL
-    - Scrapes page content using cheerio with platform-specific selectors
-    - Summarizes description using Ollama AI (temperature 0.3, 1000 tokens)
-    - Handles failures gracefully (saves job without description if scraping fails)
-    - Adds 1-second delay between requests
-13. **Job Persistence**: Saves jobs to jobs table with duplicate detection
-14. **Progress Tracking**: Shows extraction progress and summary statistics (including description fetch stats if enabled)
+12. **Platform Crawlability Check**: Determines whether each job URL can be crawled:
+    - Checks platforms database for crawlability flags
+    - Non-crawlable platforms (e.g., LinkedIn) marked for special handling
+13. **Optional Description Fetching** (if `FETCH_DESCRIPTIONS=true`):
+    - **For crawlable platforms**:
+      - Visits each new job URL
+      - Scrapes page content using cheerio with platform-specific selectors
+      - **Extracts salary information using Ollama AI**:
+        - Primary method: Ollama LLM analyzes job page text for salary information
+        - Validation: Rejects unrealistic values (yearly: 20k-1M, monthly: 1.5k-100k, hourly: 10-500)
+        - Understands context and complex salary formats
+        - Extracts ranges: "$80,000 - $120,000", "€60k-€80k per year"
+        - Extracts single values: "$100,000", "CHF 100'000"
+        - Handles multiple formats: US (commas), European (dots/comma), Swiss (apostrophes)
+        - Automatic currency detection (USD, EUR, GBP, CHF)
+        - Period detection (yearly, monthly, weekly, daily, hourly)
+        - Smart k-suffix handling: "50-60k" treated as "50k-60k"
+        - Fallback to regex patterns if Ollama fails
+      - Summarizes description using Ollama AI (temperature 0.3, 1000 tokens)
+      - Adds 1-second delay between requests
+    - **For non-crawlable platforms (LinkedIn, etc.)**:
+      - Uses Ollama to generate structured job description from email notification
+      - Extracts available information: Role Overview, Responsibilities, Requirements, Nice to Have, Work Details
+      - Shorter delay (500ms) as no web request needed
+      - Saves job with AI-generated description from email content
+    - Handles failures gracefully (saves job with or without description)
+14. **Job Persistence**: Saves jobs to jobs table with duplicate detection and salary data
+15. **Progress Tracking**: Shows extraction progress and summary statistics (including separate counts for web-scraped vs email-generated descriptions)
 
 ### Step 3: Job Description Processing (`pnpm process:jobs`)
 
@@ -520,13 +557,14 @@ job-seeker/
 │   ├── 007_add_description_to_jobs.sql      # Job description field for AI summaries
 │   └── 008_add_processed_to_emails.sql      # Processed flag to prevent email reprocessing
 ├── src/
-│   ├── __tests__/                  # Unit tests (138 tests passing)
+│   ├── __tests__/                  # Unit tests (214 tests passing)
 │   │   ├── gmail-auth.test.ts      # 8 tests for OAuth authentication
 │   │   ├── email-scanner.test.ts   # 14 tests for email fetching
 │   │   ├── email-categorizer.test.ts # 13 tests for AI categorization
 │   │   ├── job-portal-domains.test.ts # 15 tests for domain whitelisting
 │   │   ├── url-extractor.test.ts   # 28 tests for URL extraction
-│   │   └── database.test.ts        # 60 tests for database operations (emails, jobs, skills, salary, descriptions, processed)
+│   │   ├── job-scraper.test.ts     # 43 tests for salary extraction (ranges, single values, formats, currencies, periods)
+│   │   └── database.test.ts        # 93 tests for database operations (emails, jobs, skills, salary, descriptions, processed)
 │   ├── email-categorizer.ts        # AI-powered categorization with Ollama
 │   ├── email-scanner.ts            # Email fetching with progress bars
 │   ├── gmail-auth.ts               # Gmail OAuth authentication
@@ -604,11 +642,11 @@ By default, these platforms are marked as non-crawlable:
 
 When jobs from non-crawlable platforms are encountered, they are:
 - **Saved to the database** - Job title and URL are tracked for completeness
-- **Without descriptions** - Description fetching is skipped (can't crawl the page)
-- **Tracked in statistics** - Shows count and skip reasons in extraction summary
-- **Logged for visibility** - Console output shows which platforms were saved without descriptions
+- **AI-Generated descriptions from email** - Uses Ollama to create structured job descriptions from the email notification content (if FETCH_DESCRIPTIONS is enabled)
+- **Tracked separately in statistics** - Shows count of email-generated vs web-scraped descriptions
+- **Logged for visibility** - Console output shows which platforms had descriptions generated from email
 
-This approach ensures you have a complete record of ALL job opportunities (including LinkedIn), but only fetches descriptions for platforms that can actually be crawled.
+This approach ensures you have a complete record of ALL job opportunities (including LinkedIn) with descriptions. For crawlable platforms, descriptions come from web scraping; for non-crawlable platforms, descriptions are generated from the email notification using AI.
 
 ### Viewing Platform Status
 
@@ -775,6 +813,14 @@ pnpm build
 - **job-scraper.ts** - Web scraping module for job pages:
   - Fetches HTML with proper browser headers
   - Extracts job descriptions using cheerio with 15+ platform-specific selectors
+  - **AI-powered salary extraction** using Ollama LLM:
+    - Primary: Ollama analyzes job page text with context awareness
+    - Fallback: Regex patterns for when Ollama is unavailable
+    - Handles multiple formats: US ($80,000), European (€80.000,50), Swiss (CHF 80'000)
+    - Supports ranges and single values with k-suffix ("50-60k" → 50k-60k)
+    - Detects currencies (USD, EUR, GBP, CHF) and periods (yearly, monthly, hourly, etc.)
+    - Returns structured data (min, max, currency, period)
+    - Better accuracy with complex or unusual salary formats
   - Cleans and normalizes extracted text
   - Removes noise elements (scripts, styles, navigation, footers)
   - Fallback extraction strategies for unknown platforms

@@ -29,7 +29,12 @@ Job Seeker is an automation tool that:
 - AI job summarization using Ollama (structured summaries with role, responsibilities, requirements)
 - Skills database with 70+ skills across 11 categories
 - Job-skill matching with relevance scoring
-- Salary tracking (min/max ranges with currency and period)
+- **Salary extraction and tracking** - Automatically extracts salary from job pages:
+  - Multiple formats: US ($80,000), European (€80.000,50), Swiss (CHF 80'000)
+  - Ranges and single values with k-suffix handling ("50-60k" → 50k-60k)
+  - Currency detection (USD, EUR, GBP, CHF) and normalization
+  - Period detection (yearly, monthly, weekly, daily, hourly)
+  - Stores structured data (min/max/currency/period) for filtering
 - **Platform crawl control** - Database table managing 70+ platforms with configurable crawlability flags
 - **Smart platform filtering** - Saves ALL jobs (including LinkedIn) but only fetches descriptions for crawlable platforms
 - Migration system with automatic tracking (migrations folder with individual .sql files)
@@ -38,7 +43,7 @@ Job Seeker is an automation tool that:
 - Color-coded terminal output (green ✓ for job-related, red ✗ for others)
 - Confidence scoring (high/medium/low) for categorizations
 - Database statistics (total, job-related, confidence breakdown, platform stats)
-- Comprehensive unit test coverage: **156 tests passing** (vitest)
+- Comprehensive unit test coverage: **214 tests passing** (vitest)
 - TypeScript-only codebase with strict type checking
 
 ### 🔜 To Be Implemented
@@ -173,6 +178,7 @@ All scripts must be executed using **dotenvx**. Common commands will include:
 **Platform Management Functions** (NEW):
 - `getPlatforms()` - Returns all platforms sorted by name
 - `getPlatformByDomain(url)` - Finds platform by URL (supports subdomains)
+- `getPlatformIdFromEmail(emailAddress)` - Extracts platform ID from email address
 - `canCrawlUrl(url)` - Checks if URL can be crawled (returns true for unknown platforms)
 - `getSkipReason(url)` - Returns skip reason for non-crawlable URLs
 - `updatePlatformCrawlability(domain, canCrawl, skipReason)` - Updates crawl flag and reason
@@ -203,6 +209,8 @@ CREATE TABLE emails (
   confidence TEXT NOT NULL CHECK(confidence IN ('high', 'medium', 'low')),
   is_job_related INTEGER NOT NULL CHECK(is_job_related IN (0, 1)),
   reason TEXT,
+  processed INTEGER NOT NULL DEFAULT 0 CHECK(processed IN (0, 1)),
+  platform_id INTEGER REFERENCES platforms(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL,
   scanned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -309,12 +317,14 @@ For every new feature or bug fix:
 - All tests located in src/__tests__/ directory
 - Test files follow naming: `<module-name>.test.ts`
 
-**Current Test Coverage** (81 tests passing):
+**Current Test Coverage** (214 tests passing):
 - `gmail-auth.test.ts` - 8 tests (OAuth authentication, token management)
 - `email-scanner.test.ts` - 14 tests (email fetching, body extraction, progress bars)
 - `email-categorizer.test.ts` - 13 tests (domain check, Ollama integration, error handling)
 - `job-portal-domains.test.ts` - 15 tests (domain extraction, whitelist matching, case sensitivity)
-- `database.test.ts` - 31 tests (email operations: 18 tests, job operations: 13 tests)
+- `url-extractor.test.ts` - 28 tests (URL extraction, job title parsing, deduplication)
+- `job-scraper.test.ts` - 43 tests (salary extraction: ranges, single values, formats, currencies, periods, k-suffix handling)
+- `database.test.ts` - 93 tests (emails, jobs, skills, salary, descriptions, processed flag, platform tracking)
 
 **Running Tests**:
 ```bash
