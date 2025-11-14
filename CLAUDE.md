@@ -205,6 +205,7 @@ CREATE TABLE emails (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   gmail_id TEXT NOT NULL UNIQUE,
   subject TEXT,
+  from_address TEXT,  -- Sender email for platform detection
   body TEXT,  -- NULL for low/medium confidence
   confidence TEXT NOT NULL CHECK(confidence IN ('high', 'medium', 'low')),
   is_job_related INTEGER NOT NULL CHECK(is_job_related IN (0, 1)),
@@ -237,12 +238,14 @@ CREATE TABLE migrations (
 CREATE TABLE platforms (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   platform_name TEXT NOT NULL,
-  domain TEXT NOT NULL UNIQUE,
+  hostname TEXT NOT NULL UNIQUE,  -- TLD-agnostic (e.g., 'linkedin' not 'linkedin.com')
   can_crawl INTEGER NOT NULL DEFAULT 1 CHECK(can_crawl IN (0, 1)),
   skip_reason TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 -- Pre-populated with 70+ known job boards and platforms
+-- hostname stored without TLD for automatic matching across domains
+-- Example: 'linkedin' matches linkedin.com, linkedin.de, linkedin.co.uk
 -- LinkedIn set to can_crawl=0 (requires multi-level authentication)
 ```
 

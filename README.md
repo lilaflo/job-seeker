@@ -132,10 +132,12 @@ The migration system:
 This creates `job-seeker.db` with the following structure:
 
 **emails table**: Stores scanned emails
-- gmail_id (unique), subject, body, confidence, is_job_related, reason, processed, timestamps
+- gmail_id (unique), subject, from_address, body, confidence, is_job_related, reason, processed, platform_id (FK), timestamps
 - Smart storage: High-confidence emails store full body text, low/medium confidence stores only metadata
 - processed: INTEGER (0/1) - Tracks whether email has been fully processed to prevent reprocessing
-- Indexes: Optimized for fast lookups by gmail_id, confidence, job-related status, processed status, and date
+- from_address: TEXT - Sender email address for platform detection and filtering
+- platform_id: INTEGER - Foreign key to platforms table, automatically detected from sender
+- Indexes: Optimized for fast lookups by gmail_id, confidence, job-related status, processed status, from_address, platform_id, and date
 
 **jobs table**: Tracks job postings to prevent duplicate scans
 - id, title, link (unique), email_id (foreign key), salary_min, salary_max, salary_currency, salary_period, description, created_at, scanned_at
@@ -173,6 +175,15 @@ This creates `job-seeker.db` with the following structure:
 - CASCADE deletion: removes matches when job or skill is deleted
 - Indexes: Optimized for finding skills by job, jobs by skill, and sorting by relevance
 
+**platforms table**: Manages job platforms and crawlability
+- id, platform_name, hostname (unique), can_crawl, skip_reason, created_at
+- 70+ pre-configured platforms (LinkedIn, Indeed, Greenhouse, etc.)
+- hostname: TLD-agnostic matching (e.g., 'linkedin' matches linkedin.com, linkedin.de, linkedin.co.uk)
+- can_crawl: INTEGER (0/1) - Controls which platforms can have descriptions fetched
+- skip_reason: TEXT - Explanation for why platform cannot be crawled
+- Linked to emails via platform_id foreign key for automatic sender tracking
+- Indexes: Optimized for hostname and crawlability lookups
+
 **migrations table**: Tracks applied database migrations
 - id, filename (unique), applied_at
 - Automatically managed by `migrate.sh`
@@ -194,6 +205,23 @@ SELECT COUNT(*) FROM emails WHERE is_job_related=1;
 
 # View recent emails
 SELECT gmail_id, subject, confidence FROM emails ORDER BY created_at DESC LIMIT 10;
+
+# View emails with sender information
+SELECT gmail_id, subject, from_address, confidence FROM emails
+WHERE from_address IS NOT NULL ORDER BY created_at DESC LIMIT 10;
+
+# Find emails from a specific platform
+SELECT e.gmail_id, e.subject, e.from_address, p.platform_name
+FROM emails e
+JOIN platforms p ON e.platform_id = p.id
+WHERE p.platform_name = 'LinkedIn';
+
+# Count emails by platform
+SELECT p.platform_name, COUNT(*) as email_count
+FROM emails e
+LEFT JOIN platforms p ON e.platform_id = p.id
+GROUP BY p.platform_name
+ORDER BY email_count DESC;
 
 # View all tracked jobs with salary info
 SELECT title, link, salary_min, salary_max, salary_currency, salary_period
@@ -395,6 +423,28 @@ dotenvx run -- pnpm start
 # Development mode with hot reload (step 1 only)
 dotenvx run -- pnpm dev
 ```
+
+### Utility Scripts
+
+For database maintenance and backfilling data:
+
+```bash
+# Populate from_address for existing emails (one-time)
+dotenvx run -- pnpm populate:from
+
+# Update platform_id for existing emails (one-time)
+dotenvx run -- pnpm update:platforms
+```
+
+**populate:from** - Backfills sender email addresses for existing emails in database
+- Fetches email metadata from Gmail API
+- Updates from_address column for all emails where it's NULL
+- Useful after adding the from_address column via migration
+
+**update:platforms** - Links existing emails to their source platforms
+- Uses from_address to detect platform (LinkedIn, Indeed, etc.)
+- Updates platform_id foreign key for all emails where it's NULL
+- Automatically matches TLD-agnostic hostnames (linkedin.com, linkedin.de → linkedin)
 
 ### Running Tests
 
