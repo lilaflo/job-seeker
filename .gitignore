@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+token.json
+credentials.json
+*.db
+*.sqlite
+.claude/settings.local.json
+credentials.json
+resume.md

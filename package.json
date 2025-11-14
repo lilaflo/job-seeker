@@ -1,0 +1,42 @@
+{
+  "name": "job-seeker",
+  "version": "1.0.0",
+  "description": "Scan google email box for job mails, visit the job description page and find out, if the job matches my skills. If yes, mark the mail as important",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/index.ts",
+    "scan:emails": "tsx src/index.ts",
+    "scan:jobs": "tsx src/extract-jobs.ts",
+    "process:jobs": "tsx src/process-jobs.ts",
+    "scan:all": "tsx src/index.ts && tsx src/extract-jobs.ts",
+    "scan:full": "tsx src/index.ts && tsx src/extract-jobs.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.22.0",
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/cheerio": "^1.0.0",
+    "@types/cli-progress": "^3.11.6",
+    "@types/node": "^24.10.1",
+    "@vitest/ui": "^4.0.9",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.9"
+  },
+  "dependencies": {
+    "@dotenvx/dotenvx": "^1.51.1",
+    "better-sqlite3": "^12.4.1",
+    "cheerio": "^1.1.2",
+    "cli-progress": "^3.12.0",
+    "dotenv": "^17.2.3",
+    "google-auth-library": "^10.5.0",
+    "googleapis": "^166.0.0",
+    "ollama": "^0.6.3"
+  }
+}
