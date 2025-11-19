@@ -844,6 +844,8 @@
               case "scan_complete":
                 this.scanResult = data.result;
                 this.scanProgress = null;
+                // Clear scanned emails list after scan completes
+                this.scannedEmails = [];
                 // Refresh jobs list after scan completes
                 this.fetchJobs();
                 break;
@@ -854,6 +856,8 @@
                   error: data.error,
                 };
                 this.scanProgress = null;
+                // Clear scanned emails list on error
+                this.scannedEmails = [];
                 break;
 
               case "reload":
