@@ -16,6 +16,7 @@ import {
   getJobs,
   getJobStats,
   clearAllJobs,
+  deleteJob,
   addSkillToJob,
   addSkillsToJob,
   removeSkillFromJob,
@@ -795,6 +796,52 @@ describe('database', () => {
       clearAllJobs();
 
       expect(getJobs()).toHaveLength(0);
+    });
+  });
+
+  describe('deleteJob', () => {
+    it('should delete a job by ID and return true', () => {
+      saveJob('Job 1', 'https://example.com/job/1');
+      saveJob('Job 2', 'https://example.com/job/2');
+
+      const jobs = getJobs();
+      expect(jobs).toHaveLength(2);
+
+      // Find the job with job/1 to delete it
+      const jobToDelete = jobs.find(j => j.link === 'https://example.com/job/1');
+      expect(jobToDelete).toBeDefined();
+
+      const result = deleteJob(jobToDelete!.id);
+      expect(result).toBe(true);
+
+      const remainingJobs = getJobs();
+      expect(remainingJobs).toHaveLength(1);
+      expect(remainingJobs[0].link).toBe('https://example.com/job/2');
+    });
+
+    it('should return false when job ID does not exist', () => {
+      saveJob('Job 1', 'https://example.com/job/1');
+
+      const result = deleteJob(99999);
+      expect(result).toBe(false);
+
+      expect(getJobs()).toHaveLength(1);
+    });
+
+    it('should only delete the specified job', () => {
+      saveJob('Job 1', 'https://example.com/job/1');
+      saveJob('Job 2', 'https://example.com/job/2');
+      saveJob('Job 3', 'https://example.com/job/3');
+
+      const jobs = getJobs();
+      const jobToDelete = jobs.find(j => j.link === 'https://example.com/job/2');
+      expect(jobToDelete).toBeDefined();
+
+      deleteJob(jobToDelete!.id);
+
+      const remainingJobs = getJobs();
+      expect(remainingJobs).toHaveLength(2);
+      expect(remainingJobs.map(j => j.link)).not.toContain('https://example.com/job/2');
     });
   });
 

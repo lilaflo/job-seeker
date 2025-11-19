@@ -396,6 +396,15 @@ export function clearAllJobs(): void {
   database.prepare('DELETE FROM jobs').run();
 }
 
+/**
+ * Deletes a job by ID
+ */
+export function deleteJob(id: number): boolean {
+  const database = getDatabase();
+  const result = database.prepare('DELETE FROM jobs WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
 // ============================================================================
 // Skills Management Functions
 // ============================================================================
