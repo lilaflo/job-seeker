@@ -19,8 +19,6 @@ import {
   closeDatabase,
 } from "./database";
 import {
-  enqueueEmailScan,
-  getEmailScanQueueStats,
   checkRedisConnection,
 } from "./queue";
 

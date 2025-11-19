@@ -70,7 +70,15 @@ An automation tool that scans Gmail for job-related emails, extracts job descrip
   - **WebSocket-based**: Uses existing WebSocket connection for instant reload notifications
   - **Development mode**: Enabled with `NODE_ENV=development` or `pnpm dev`
   - **Production mode**: Disabled in production for optimal performance
-- ✅ **Comprehensive Unit Tests** - Full test coverage with 262 passing tests using Vitest
+- ✅ **Centralized Logging System** - Database-backed logging for errors and warnings:
+  - **Global logger**: Import and use `logger` from any module
+  - **Database persistence**: All logs stored in SQLite for historical analysis
+  - **Log levels**: error, warning, info, debug with automatic console output
+  - **Stack traces**: Automatic capture for error-level logs
+  - **Context support**: Attach structured data to any log entry
+  - **Query API**: Filter logs by level, source, date with pagination support
+  - **Maintenance**: Auto-cleanup of old logs with configurable retention
+- ✅ **Comprehensive Unit Tests** - Full test coverage with 287 passing tests using Vitest
 
 ### Coming Soon
 

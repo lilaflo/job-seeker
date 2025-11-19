@@ -23,22 +23,6 @@ export interface EmbeddingJobResult {
   error?: string;
 }
 
-export interface EmailScanJobData {
-  query: string;
-  maxResults: number;
-}
-
-export interface EmailScanJobResult {
-  success: boolean;
-  message: string;
-  processed: number;
-  jobRelated: number;
-  skipped: number;
-  embeddingsGenerated: number;
-  jobsBlacklisted: number;
-  error?: string;
-}
-
 export interface JobExtractionJobData {
   emailId: number;
   gmailId: string;
@@ -71,7 +55,6 @@ export interface JobProcessingJobResult {
 
 // Queue instances (lazy initialized)
 let embeddingQueue: Bull.Queue<EmbeddingJobData> | null = null;
-let emailScanQueue: Bull.Queue<EmailScanJobData> | null = null;
 let jobExtractionQueue: Bull.Queue<JobExtractionJobData> | null = null;
 let jobProcessingQueue: Bull.Queue<JobProcessingJobData> | null = null;
 
@@ -144,51 +127,6 @@ export async function enqueueEmbeddingJobs(
 
   await queue.addBulk(bulkJobs);
   return bulkJobs.length;
-}
-
-/**
- * Get or create the email scan queue
- */
-export function getEmailScanQueue(): Bull.Queue<EmailScanJobData> {
-  if (!emailScanQueue) {
-    emailScanQueue = new Bull<EmailScanJobData>('email-scan', {
-      redis: {
-        host: REDIS_HOST,
-        port: REDIS_PORT,
-      },
-      defaultJobOptions: {
-        removeOnComplete: true,
-        removeOnFail: false,
-        attempts: 1, // No retries for email scans
-        timeout: 300000, // 5 minute timeout
-      },
-    });
-
-    emailScanQueue.on('error', (err) => {
-      console.error('Email scan queue error:', err);
-    });
-
-    emailScanQueue.on('failed', (job, err) => {
-      console.error(`Email scan job ${job.id} failed:`, err.message);
-    });
-  }
-
-  return emailScanQueue;
-}
-
-/**
- * Add an email scan job to the queue
- */
-export async function enqueueEmailScan(
-  query: string = 'newer_than:7d',
-  maxResults: number = 20
-): Promise<Bull.Job<EmailScanJobData>> {
-  const queue = getEmailScanQueue();
-
-  return queue.add({
-    query,
-    maxResults,
-  });
 }
 
 /**
@@ -319,42 +257,12 @@ export async function getQueueStats(): Promise<{
 }
 
 /**
- * Get email scan queue statistics
- */
-export async function getEmailScanQueueStats(): Promise<{
-  waiting: number;
-  active: number;
-  completed: number;
-  failed: number;
-}> {
-  const queue = getEmailScanQueue();
-
-  const [waiting, active, completed, failed] = await Promise.all([
-    queue.getWaitingCount(),
-    queue.getActiveCount(),
-    queue.getCompletedCount(),
-    queue.getFailedCount(),
-  ]);
-
-  return {
-    waiting,
-    active,
-    completed,
-    failed,
-  };
-}
-
-/**
  * Close all queue connections
  */
 export async function closeQueues(): Promise<void> {
   if (embeddingQueue) {
     await embeddingQueue.close();
     embeddingQueue = null;
-  }
-  if (emailScanQueue) {
-    await emailScanQueue.close();
-    emailScanQueue = null;
   }
   if (jobExtractionQueue) {
     await jobExtractionQueue.close();

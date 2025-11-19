@@ -5,7 +5,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import Bull from 'bull';
 import { processEmbeddingJob } from '../jobs/embedding.job';
-import { processEmailScanJob } from '../jobs/email-scan.job';
 import { processJobExtractionJob } from '../jobs/job-extraction.job';
 import { processJobProcessingJob, setOllamaModel } from '../jobs/job-processing.job';
 
@@ -28,34 +27,6 @@ vi.mock('../database', () => ({
       get: vi.fn(() => ({ id: 1 })),
     })),
   })),
-}));
-
-vi.mock('../scan-runner', () => ({
-  runScan: vi.fn(async ({ onProgress, onEmailProcessed }) => {
-    // Simulate progress events
-    if (onProgress) {
-      onProgress({ type: 'start', message: 'Starting...', current: 0, total: 1 });
-      onProgress({ type: 'end', message: 'Done', current: 1, total: 1 });
-    }
-    if (onEmailProcessed) {
-      onEmailProcessed({ isJobRelated: true, confidence: 'high', subject: 'Test Job' });
-    }
-    return {
-      success: true,
-      message: 'Scan complete',
-      processed: 5,
-      jobRelated: 3,
-      skipped: 2,
-      jobsEnqueued: 3,
-      stats: {
-        total: 5,
-        jobRelated: 3,
-        highConfidence: 2,
-        mediumConfidence: 1,
-        lowConfidence: 0,
-      },
-    };
-  }),
 }));
 
 vi.mock('../url-extractor', () => ({
@@ -120,44 +91,6 @@ describe('Job Processors', () => {
       } as unknown as Bull.Job;
 
       await expect(processEmbeddingJob(job)).rejects.toThrow('Ollama unavailable');
-    });
-  });
-
-  describe('processEmailScanJob', () => {
-    it('should scan emails successfully', async () => {
-      const job = {
-        data: {
-          query: 'newer_than:7d',
-          maxResults: 20,
-        },
-        progress: vi.fn(),
-      } as unknown as Bull.Job;
-
-      const result = await processEmailScanJob(job);
-
-      expect(result.success).toBe(true);
-      expect(result.processed).toBe(5);
-      expect(result.jobRelated).toBe(3);
-      expect(result.skipped).toBe(2);
-    });
-
-    it('should handle scan errors gracefully', async () => {
-      const { runScan } = await import('../scan-runner');
-      vi.mocked(runScan).mockRejectedValueOnce(new Error('Gmail API error'));
-
-      const job = {
-        data: {
-          query: 'newer_than:7d',
-          maxResults: 20,
-        },
-        progress: vi.fn(),
-      } as unknown as Bull.Job;
-
-      const result = await processEmailScanJob(job);
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('Gmail API error');
-      expect(result.processed).toBe(0);
     });
   });
 

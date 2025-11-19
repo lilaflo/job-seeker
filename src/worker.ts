@@ -7,11 +7,9 @@
 import Bull from 'bull';
 import {
   getEmbeddingQueue,
-  getEmailScanQueue,
   getJobExtractionQueue,
   getJobProcessingQueue,
   type EmbeddingJobData,
-  type EmailScanJobData,
   type JobExtractionJobData,
   type JobProcessingJobData,
 } from './queue';
@@ -19,7 +17,6 @@ import { checkEmbeddingModelAvailable } from './embeddings';
 import { closeDatabase } from './database';
 import { checkOllamaAvailability, getBestModel } from './email-categorizer';
 import { processEmbeddingJob } from './jobs/embedding.job';
-import { processEmailScanJob } from './jobs/email-scan.job';
 import { processJobExtractionJob } from './jobs/job-extraction.job';
 import { processJobProcessingJob, setOllamaModel } from './jobs/job-processing.job';
 
@@ -49,11 +46,6 @@ async function main() {
   await queue.isReady();
   console.log('Connected to Redis');
 
-  // Get email scan queue
-  const emailScanQueue = getEmailScanQueue();
-  await emailScanQueue.isReady();
-  console.log('Email scan queue ready');
-
   // Get job extraction queue
   const jobExtractionQueue = getJobExtractionQueue();
   await jobExtractionQueue.isReady();
@@ -82,7 +74,6 @@ async function main() {
   let succeeded = 0;
   let failed = 0;
   let blacklisted = 0;
-  let emailScansProcessed = 0;
   let jobsExtracted = 0;
   let jobsProcessed = 0;
 
@@ -120,26 +111,6 @@ async function main() {
     console.debug(`Job ${job.id} progress: ${progress}%`);
   });
 
-  // Process email scan jobs (only one at a time)
-  emailScanQueue.process(1, async (job: Bull.Job<EmailScanJobData>) => {
-    const result = await processEmailScanJob(job);
-
-    if (result.success) {
-      emailScansProcessed++;
-    }
-
-    return result;
-  });
-
-  // Handle email scan queue events
-  emailScanQueue.on('completed', (job, result) => {
-    console.debug(`Email scan job ${job.id} completed: ${result.success ? 'success' : 'failed'}`);
-  });
-
-  emailScanQueue.on('failed', (job, err) => {
-    console.error(`Email scan job ${job.id} failed:`, err.message);
-  });
-
   // Process job extraction jobs
   jobExtractionQueue.process(CONCURRENCY, async (job: Bull.Job<JobExtractionJobData>) => {
     const result = await processJobExtractionJob(job);
@@ -170,13 +141,11 @@ async function main() {
     console.log('\nShutting down worker...');
 
     await queue.close();
-    await emailScanQueue.close();
     await jobExtractionQueue.close();
     await jobProcessingQueue.close();
     closeDatabase();
 
     console.log('\n--- Worker Statistics ---');
-    console.log(`Email scans processed: ${emailScansProcessed}`);
     console.log(`Jobs extracted: ${jobsExtracted}`);
     console.log(`Jobs processed: ${jobsProcessed}`);
     console.log(`Embeddings generated: ${processed}`);
