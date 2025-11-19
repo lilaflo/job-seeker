@@ -78,7 +78,8 @@ An automation tool that scans Gmail for job-related emails, extracts job descrip
   - **Context support**: Attach structured data to any log entry
   - **Query API**: Filter logs by level, source, date with pagination support
   - **Maintenance**: Auto-cleanup of old logs with configurable retention
-- ✅ **Comprehensive Unit Tests** - Full test coverage with 287 passing tests using Vitest
+- ✅ **Comprehensive Unit Tests** - Full test coverage with 310 passing tests using Vitest
+- ✅ **Automated Test Enforcement** - Git pre-commit hooks automatically run all tests before every commit
 
 ### Coming Soon
 
