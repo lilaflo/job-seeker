@@ -6,7 +6,11 @@
 import { authorize, testGmailConnection } from './gmail-auth';
 import { fetchEmails, fetchEmailBodies, processEmailsWithProgress } from './email-scanner';
 import { checkOllamaAvailability, getBestModel, categorizeEmail, type CategorizedEmail } from './email-categorizer';
-import { getScannedEmailIds, saveEmail, markEmailAsProcessed, getEmailStats } from './database';
+import { getScannedEmailIds, saveEmail, markEmailAsProcessed, getEmailStats, markJobBlacklisted, getDatabase } from './database';
+import { getJobsWithoutEmbeddings, generateAndSaveJobEmbedding, getBlacklistKeywords, bufferToEmbedding, cosineSimilarity } from './embeddings';
+
+// Queue configuration
+const EMBEDDING_CONCURRENCY = 3; // Number of concurrent embedding operations
 
 export interface ScanResult {
   success: boolean;
@@ -14,6 +18,8 @@ export interface ScanResult {
   processed: number;
   jobRelated: number;
   skipped: number;
+  embeddingsGenerated: number;
+  jobsBlacklisted: number;
   stats: {
     total: number;
     jobRelated: number;
@@ -41,10 +47,54 @@ export interface ProcessedEmailEvent {
 }
 
 export interface ScanProgressEvent {
-  type: 'start' | 'fetching' | 'categorizing' | 'complete';
+  type: 'start' | 'fetching' | 'categorizing' | 'generating_embeddings' | 'complete';
   total?: number;
   current?: number;
   message: string;
+}
+
+/**
+ * Process items in a queue with concurrency control
+ */
+async function processQueue<T, R>(
+  items: T[],
+  processor: (item: T) => Promise<R>,
+  options: {
+    concurrency: number;
+    onProgress?: (completed: number, total: number) => void;
+  }
+): Promise<Array<{ item: T; result: R | null; error?: Error }>> {
+  const { concurrency, onProgress } = options;
+  const results: Array<{ item: T; result: R | null; error?: Error }> = [];
+  let completed = 0;
+  let currentIndex = 0;
+
+  async function processNext(): Promise<void> {
+    while (currentIndex < items.length) {
+      const index = currentIndex++;
+      const item = items[index];
+
+      try {
+        const result = await processor(item);
+        results[index] = { item, result };
+      } catch (error) {
+        results[index] = { item, result: null, error: error as Error };
+      }
+
+      completed++;
+      if (onProgress) {
+        onProgress(completed, items.length);
+      }
+    }
+  }
+
+  // Start concurrent workers
+  const workers = Array(Math.min(concurrency, items.length))
+    .fill(null)
+    .map(() => processNext());
+
+  await Promise.all(workers);
+  return results;
 }
 
 /**
@@ -92,6 +142,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
       processed: 0,
       jobRelated: 0,
       skipped: 0,
+      embeddingsGenerated: 0,
+      jobsBlacklisted: 0,
       stats,
     };
   }
@@ -110,6 +162,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
       processed: 0,
       jobRelated: 0,
       skipped,
+      embeddingsGenerated: 0,
+      jobsBlacklisted: 0,
       stats,
     };
   }
@@ -174,11 +228,85 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
 
   // Calculate results
   const jobRelatedCount = categorizedEmails.filter(e => e.category.isJobRelated).length;
+
+  // Generate embeddings for jobs without them
+  const jobsToEmbed = getJobsWithoutEmbeddings();
+  let embeddingsGenerated = 0;
+  let jobsBlacklisted = 0;
+
+  if (jobsToEmbed.length > 0) {
+    emitProgress({
+      type: 'generating_embeddings',
+      total: jobsToEmbed.length,
+      current: 0,
+      message: `Generating embeddings for ${jobsToEmbed.length} jobs...`
+    });
+
+    // Pre-fetch blacklist embeddings for fast comparison
+    const blacklistKeywords = getBlacklistKeywords();
+    const blacklistEmbeddings = blacklistKeywords
+      .filter(k => k.embedding)
+      .map(k => bufferToEmbedding(k.embedding!));
+    const minSimilarity = 0.7;
+
+    // Process jobs in queue with concurrency
+    const results = await processQueue(
+      jobsToEmbed,
+      async (job) => {
+        // Generate embedding
+        await generateAndSaveJobEmbedding(job.id, job.title, job.description);
+
+        // Get the generated embedding for blacklist comparison
+        const db = getDatabase();
+        const row = db.prepare('SELECT embedding FROM job_embeddings WHERE job_id = ?').get(job.id) as { embedding: Buffer } | undefined;
+
+        if (row && blacklistEmbeddings.length > 0) {
+          const jobEmbedding = bufferToEmbedding(row.embedding);
+
+          // Check against blacklist embeddings
+          for (const blacklistEmb of blacklistEmbeddings) {
+            const similarity = cosineSimilarity(jobEmbedding, blacklistEmb);
+            if (similarity >= minSimilarity) {
+              markJobBlacklisted(job.id, true);
+              return { blacklisted: true };
+            }
+          }
+        }
+
+        return { blacklisted: false };
+      },
+      {
+        concurrency: EMBEDDING_CONCURRENCY,
+        onProgress: (completed, total) => {
+          embeddingsGenerated = completed;
+          emitProgress({
+            type: 'generating_embeddings',
+            total,
+            current: completed,
+            message: `Generated ${completed}/${total} embeddings`
+          });
+        }
+      }
+    );
+
+    // Count results
+    embeddingsGenerated = results.filter(r => r.result !== null).length;
+    jobsBlacklisted = results.filter(r => r.result?.blacklisted).length;
+
+    // Log errors
+    results
+      .filter(r => r.error)
+      .forEach(r => {
+        const job = r.item as { id: number };
+        console.error(`Failed to generate embedding for job ${job.id}:`, r.error);
+      });
+  }
+
   const stats = getEmailStats();
 
   emitProgress({
     type: 'complete',
-    message: `Processed ${categorizedEmails.length} emails, ${jobRelatedCount} job-related`
+    message: `Processed ${categorizedEmails.length} emails, ${jobRelatedCount} job-related, ${embeddingsGenerated} embeddings`
   });
 
   return {
@@ -187,6 +315,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
     processed: categorizedEmails.length,
     jobRelated: jobRelatedCount,
     skipped,
+    embeddingsGenerated,
+    jobsBlacklisted,
     stats,
   };
 }

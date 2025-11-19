@@ -22,6 +22,16 @@ import {
 } from "./url-extractor";
 import { scrapeJobPage } from "./job-scraper";
 import { checkOllamaAvailability, getBestModel } from "./email-categorizer";
+import {
+  getJobsWithoutEmbeddings,
+  getEmbeddingStats,
+} from "./embeddings";
+import {
+  enqueueEmbeddingJobs,
+  getQueueStats,
+  checkRedisConnection,
+  closeQueues,
+} from "./queue";
 import { Ollama } from "ollama";
 import cliProgress from "cli-progress";
 
@@ -490,15 +500,59 @@ async function main() {
     console.log("\n--- Database Statistics ---");
     console.log(`Total jobs in database: ${stats.total}`);
 
+    // Queue embeddings for jobs without them
+    console.log("\n=== Queueing Job Embeddings ===\n");
+
+    const jobsToEmbed = getJobsWithoutEmbeddings();
+
+    if (jobsToEmbed.length === 0) {
+      console.log("✓ All jobs already have embeddings.");
+    } else {
+      // Check Redis connection
+      const redisAvailable = await checkRedisConnection();
+
+      if (redisAvailable) {
+        console.log(`Found ${jobsToEmbed.length} jobs without embeddings. Queueing...\n`);
+
+        // Enqueue all jobs
+        const enqueuedCount = await enqueueEmbeddingJobs(jobsToEmbed);
+
+        console.log(`✓ Queued ${enqueuedCount} jobs for embedding generation`);
+
+        // Show queue stats
+        const queueStats = await getQueueStats();
+        console.log("\n--- Queue Status ---");
+        console.log(`Waiting: ${queueStats.waiting}`);
+        console.log(`Active: ${queueStats.active}`);
+        console.log(`Completed: ${queueStats.completed}`);
+        console.log(`Failed: ${queueStats.failed}`);
+
+        console.log("\nTo process the queue, run: pnpm worker");
+      } else {
+        console.error("✗ Redis is not available. Cannot queue embedding jobs.");
+        console.error("  Start Redis with: pnpm redis:start");
+        console.log(`  ${jobsToEmbed.length} jobs need embeddings but were not queued.`);
+      }
+    }
+
+    // Final embedding statistics
+    const embedStats = getEmbeddingStats();
+    console.log("\n--- Embedding Statistics ---");
+    console.log(`Total jobs: ${embedStats.total}`);
+    console.log(`With embeddings: ${embedStats.withEmbeddings}`);
+    console.log(`Without embeddings: ${embedStats.withoutEmbeddings}`);
+
     console.log("\n✓ Job processing complete!");
 
-    // Close database connection
+    // Close connections
+    await closeQueues();
     closeDatabase();
   } catch (error) {
     console.error(
       "\n✗ Error:",
       error instanceof Error ? error.message : String(error)
     );
+    await closeQueues();
     closeDatabase();
     process.exit(1);
   }

@@ -121,7 +121,12 @@ pnpm install
    - `mistral` (7B parameters, good balance)
    - `phi3` (3.8B parameters, lightweight)
 
-3. **Start Ollama server**:
+3. **Pull the embedding model** (required for semantic search):
+   ```bash
+   ollama pull nomic-embed-text
+   ```
+
+4. **Start Ollama server**:
    ```bash
    ollama serve
    ```
@@ -358,15 +363,28 @@ Create a `skills.md` file in the project root with your skills and qualification
 
 The Job Seeker uses a simple two-step workflow:
 
-### View Jobs in Web Interface
+### Start the Application
 
-Start the web server to view your job listings in a browser:
+Start all services (Redis, worker, and web server) in parallel:
 
 ```bash
-dotenvx run -- pnpm serve
+pnpm start
 ```
 
+This runs:
+- **Redis** - Queue backend for embedding generation (blue output)
+- **Worker** - Processes embedding jobs from the queue (yellow output)
+- **Web Server** - API and web interface at http://localhost:3001 (green output)
+
 Then open http://localhost:3001 in your browser.
+
+**Individual services** (if needed separately):
+
+```bash
+pnpm serve        # Just the web server
+pnpm worker       # Just the worker
+pnpm redis:start  # Just Redis (detached)
+```
 
 **Features:**
 - **Job table** with sortable columns (title, link, salary, description, date)
@@ -440,6 +458,40 @@ FETCH_DESCRIPTIONS=false dotenvx run -- pnpm scan:jobs
 
 **Note**: Requires Ollama to be running for description processing. If Ollama is unavailable, description fetching will be automatically disabled.
 
+### Step 3: Generate Embeddings
+
+After extracting jobs, the `scan:jobs` command automatically queues embedding generation. The embeddings are processed by a background worker.
+
+**Start Redis and worker:**
+```bash
+# Start Redis (required)
+pnpm redis:start
+
+# Run job extraction (queues embeddings)
+dotenvx run -- pnpm scan:jobs
+
+# Start worker in another terminal (processes queue)
+pnpm worker
+```
+
+Or use `pnpm start` to run everything in parallel.
+
+**Requirements:**
+- **Ollama** with `nomic-embed-text` model installed
+- **Redis** for queue-based processing
+
+**Worker commands:**
+```bash
+pnpm redis:start    # Start Redis container
+pnpm redis:stop     # Stop Redis container
+pnpm worker         # Start embedding worker
+```
+
+**Note**: The embedding model `nomic-embed-text` must be installed in Ollama. The worker will fail with a clear error message if the model is not available:
+```bash
+ollama pull nomic-embed-text
+```
+
 ### Alternative: Process Jobs Only (Rarely Needed)
 
 Since `scan:jobs` now handles both extraction and processing, this command is rarely needed. Use it only for specific cases:
@@ -479,11 +531,11 @@ This runs:
 ### Alternative Commands
 
 ```bash
-# Original start command (runs step 1 only)
-dotenvx run -- pnpm start
+# Scan emails only (step 1)
+dotenvx run -- pnpm scan:emails
 
-# Development mode with hot reload (step 1 only)
-dotenvx run -- pnpm dev
+# Run all services in parallel (default start command)
+pnpm start
 ```
 
 ### Utility Scripts
@@ -695,7 +747,10 @@ job-seeker/
 │   ├── index.ts                    # Main entry point (Step 1: Email scanning)
 │   ├── extract-jobs.ts             # Job extraction script (Step 2: Job URL extraction)
 │   ├── process-jobs.ts             # Job processing script (Step 3: Scrape & summarize descriptions)
+│   ├── queue.ts                    # Bull queue module for background job processing
+│   ├── worker.ts                   # Queue worker for embedding generation
 │   └── server.ts                   # Web server for job listing interface (API + static files)
+├── docker-compose.yml             # Redis container configuration for queue
 ├── migrate.sh                      # Database migration script (executable)
 ├── job-seeker.db                   # SQLite database (git-ignored, auto-created)
 ├── credentials.json                # Google OAuth credentials (git-ignored)

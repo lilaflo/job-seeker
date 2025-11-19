@@ -1,834 +1,1242 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Job Seeker - Job Listings</title>
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            primary: {
-              500: '#667eea',
-              600: '#5a6fd6',
-              700: '#764ba2',
-            }
-          }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Job Seeker - Job Listings</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              primary: {
+                500: "#667eea",
+                600: "#5a6fd6",
+                700: "#764ba2",
+              },
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      /* Custom animations that Tailwind doesn't have built-in */
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
         }
       }
-    }
-  </script>
-  <style>
-    /* Custom animations that Tailwind doesn't have built-in */
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    .animate-spin-fast {
-      animation: spin 0.8s linear infinite;
-    }
-    @keyframes modalSlideIn {
-      from {
-        opacity: 0;
-        transform: translateY(-20px);
+      .animate-spin-fast {
+        animation: spin 0.8s linear infinite;
       }
-      to {
-        opacity: 1;
-        transform: translateY(0);
+      @keyframes modalSlideIn {
+        from {
+          opacity: 0;
+          transform: translateY(-20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
       }
-    }
-    .animate-modal {
-      animation: modalSlideIn 0.3s ease;
-    }
-  </style>
-</head>
-<body class="bg-gray-100 text-gray-800 leading-relaxed">
-  <div class="max-w-7xl mx-auto p-5" x-data="jobApp()" x-init="init()">
-    <!-- Header -->
-    <header class="bg-gradient-to-br from-primary-500 to-primary-700 text-white p-8 mb-8 rounded-lg shadow-md">
-      <h1 class="text-3xl font-bold mb-3">Job Seeker</h1>
-      <div class="flex gap-5 flex-wrap">
-        <div class="bg-white/20 px-4 py-2 rounded-md">
-          <div class="font-bold text-xl" x-text="jobs.length"></div>
-          <div class="text-sm">Total Jobs</div>
-        </div>
-        <div class="bg-white/20 px-4 py-2 rounded-md">
-          <div class="font-bold text-xl" x-text="jobsWithSalary"></div>
-          <div class="text-sm">With Salary</div>
-        </div>
-        <div class="bg-white/20 px-4 py-2 rounded-md">
-          <div class="font-bold text-xl" x-text="jobsWithDescription"></div>
-          <div class="text-sm">With Description</div>
-        </div>
-      </div>
-    </header>
-
-    <!-- Action bar -->
-    <div class="bg-white p-4 rounded-lg mb-5 shadow-sm flex items-center gap-4 flex-wrap">
-      <button
-        class="px-5 py-2.5 rounded-md font-medium text-sm bg-gradient-to-br from-primary-500 to-primary-700 text-white inline-flex items-center gap-2 transition-all hover:shadow-lg hover:-translate-y-0.5 disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
-        @click="startScan()"
-        :disabled="scanning"
+      .animate-modal {
+        animation: modalSlideIn 0.3s ease;
+      }
+    </style>
+  </head>
+  <body
+    class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 leading-relaxed transition-colors duration-200"
+  >
+    <div class="max-w-7xl mx-auto p-5" x-data="jobApp()" x-init="init()">
+      <!-- Header -->
+      <header
+        class="bg-gradient-to-br from-primary-500 to-primary-700 text-white p-8 mb-8 rounded-lg shadow-md dark:shadow-lg"
       >
-        <template x-if="scanning">
-          <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin-fast"></div>
-        </template>
-        <template x-if="!scanning">
-          <span>Scan Emails</span>
-        </template>
-        <span x-show="scanning">Scanning...</span>
-      </button>
-      <button
-        class="px-5 py-2.5 rounded-md font-medium text-sm bg-gray-100 text-gray-700 inline-flex items-center gap-2 transition-all hover:bg-gray-200 disabled:opacity-60 disabled:cursor-not-allowed"
-        @click="generateEmbeddings()"
-        :disabled="generatingEmbeddings"
-      >
-        <template x-if="generatingEmbeddings">
-          <div class="w-4 h-4 border-2 border-gray-400 border-t-gray-700 rounded-full animate-spin-fast"></div>
-        </template>
-        <span x-text="generatingEmbeddings ? 'Generating...' : 'Generate Embeddings'"></span>
-      </button>
-      <button
-        class="px-5 py-2.5 rounded-md font-medium text-sm bg-red-100 text-red-700 inline-flex items-center gap-2 transition-all hover:bg-red-200 disabled:opacity-60 disabled:cursor-not-allowed"
-        @click="resetDatabase()"
-        :disabled="resetting"
-      >
-        <template x-if="resetting">
-          <div class="w-4 h-4 border-2 border-red-400 border-t-red-700 rounded-full animate-spin-fast"></div>
-        </template>
-        <span x-text="resetting ? 'Resetting...' : 'Reset Database'"></span>
-      </button>
-      <span
-        class="text-sm"
-        :class="{ 'text-green-600': scanResult?.success || embeddingResult?.success || resetResult?.success, 'text-red-600': (scanResult && !scanResult.success) || (embeddingResult && !embeddingResult.success) || (resetResult && !resetResult.success), 'text-gray-500': !scanResult && !embeddingResult && !resetResult }"
-        x-text="statusMessage"
-      ></span>
-    </div>
-
-    <!-- Scan Progress Panel -->
-    <div x-show="scanning || scannedEmails.length > 0" class="bg-white p-5 rounded-lg mb-5 shadow-sm">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="font-semibold text-gray-800">
-          <span x-show="scanning">Scanning Emails...</span>
-          <span x-show="!scanning && scannedEmails.length > 0">Scan Results</span>
-        </h3>
-        <button
-          x-show="!scanning && scannedEmails.length > 0"
-          @click="scannedEmails = []"
-          class="text-sm text-gray-500 hover:text-gray-700"
-        >Clear</button>
-      </div>
-
-      <!-- Progress bar -->
-      <div x-show="scanning && scanProgress && scanProgress.total > 0" class="mb-3">
-        <div class="w-full bg-gray-200 rounded-full h-2">
-          <div
-            class="bg-primary-500 h-2 rounded-full transition-all"
-            :style="`width: ${scanProgress && scanProgress.total ? (scanProgress.current / scanProgress.total) * 100 : 0}%`"
-          ></div>
-        </div>
-        <p class="text-xs text-gray-500 mt-1" x-text="scanProgress ? scanProgress.message : ''"></p>
-      </div>
-
-      <!-- Scanned emails list -->
-      <div x-show="scannedEmails.length > 0" class="max-h-48 overflow-y-auto">
-        <template x-for="email in scannedEmails" :key="email.id">
-          <div class="flex items-center gap-3 py-2 border-b border-gray-100 last:border-0">
-            <span
-              class="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-xs"
-              :class="email.isJobRelated ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'"
+        <div class="flex items-center justify-between mb-3">
+          <h1 class="text-3xl font-bold">Job Seeker</h1>
+          <button
+            @click="toggleDarkMode()"
+            class="p-2 rounded-lg bg-white/20 hover:bg-white/30 transition-colors"
+            :title="darkMode ? 'Switch to light mode' : 'Switch to dark mode'"
+          >
+            <svg
+              x-show="!darkMode"
+              class="w-6 h-6"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
             >
-              <span x-text="email.isJobRelated ? '✓' : '✗'"></span>
-            </span>
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-gray-800 truncate" x-text="email.subject || 'No subject'"></p>
-              <p class="text-xs text-gray-500 truncate" x-text="email.from || 'Unknown sender'"></p>
-            </div>
-            <span
-              class="flex-shrink-0 text-xs px-2 py-0.5 rounded"
-              :class="{
-                'bg-green-100 text-green-700': email.confidence === 'high',
-                'bg-yellow-100 text-yellow-700': email.confidence === 'medium',
-                'bg-gray-100 text-gray-600': email.confidence === 'low'
-              }"
-              x-text="email.confidence"
-            ></span>
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
+              ></path>
+            </svg>
+            <svg
+              x-show="darkMode"
+              class="w-6 h-6"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
+              ></path>
+            </svg>
+          </button>
+        </div>
+        <div class="flex gap-5 flex-wrap">
+          <div class="bg-white/20 px-4 py-2 rounded-md">
+            <div class="font-bold text-xl" x-text="jobs.length"></div>
+            <div class="text-sm">Total Jobs</div>
           </div>
-        </template>
-      </div>
+          <div class="bg-white/20 px-4 py-2 rounded-md">
+            <div class="font-bold text-xl" x-text="jobsWithSalary"></div>
+            <div class="text-sm">With Salary</div>
+          </div>
+          <div class="bg-white/20 px-4 py-2 rounded-md">
+            <div class="font-bold text-xl" x-text="jobsWithDescription"></div>
+            <div class="text-sm">With Description</div>
+          </div>
+        </div>
+      </header>
 
-      <!-- Empty state when no emails processed -->
-      <div x-show="!scanning && scannedEmails.length === 0 && scanResult" class="text-center py-4 text-gray-500">
-        <p x-text="scanResult ? (scanResult.message || 'No new emails to process') : ''"></p>
-      </div>
-    </div>
-
-    <!-- Search -->
-    <div class="bg-white p-5 rounded-lg mb-5 shadow-sm">
-      <div class="flex items-center gap-4 flex-wrap">
-        <input
-          type="text"
-          x-model="searchTerm"
-          @input="currentPage = 1"
-          @keydown.enter="smartSearchEnabled ? performSmartSearch() : null"
-          :placeholder="smartSearchEnabled ? 'Semantic search (press Enter)...' : 'Search jobs by title, link, or description...'"
-          class="px-4 py-2.5 border border-gray-300 rounded-md w-full max-w-md text-base focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/10"
-        />
-        <label class="flex items-center gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            x-model="smartSearchEnabled"
-            @change="if (!smartSearchEnabled) fetchJobs()"
-            class="w-4 h-4 text-primary-500 rounded focus:ring-primary-500"
-          />
-          <span class="text-sm text-gray-600">Smart Search</span>
-        </label>
+      <!-- Action bar -->
+      <div
+        class="bg-white dark:bg-gray-800 p-4 rounded-lg mb-5 shadow-sm dark:shadow-md flex items-center gap-4 flex-wrap"
+      >
         <button
-          x-show="smartSearchEnabled && searchTerm"
-          @click="performSmartSearch()"
-          :disabled="searching"
-          class="px-4 py-2 rounded-md font-medium text-sm bg-primary-500 text-white hover:bg-primary-600 disabled:opacity-60 inline-flex items-center gap-2"
+          class="px-5 py-2.5 rounded-md font-medium text-sm bg-gradient-to-br from-primary-500 to-primary-700 text-white inline-flex items-center gap-2 transition-all hover:shadow-lg hover:-translate-y-0.5 disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
+          @click="startScan()"
+          :disabled="scanning"
         >
-          <template x-if="searching">
-            <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin-fast"></div>
+          <template x-if="scanning">
+            <div
+              class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin-fast"
+            ></div>
           </template>
-          <span>Search</span>
+          <template x-if="!scanning">
+            <span>Scan Emails</span>
+          </template>
+          <span x-show="scanning">Scanning...</span>
         </button>
-      </div>
-      <p x-show="smartSearchEnabled" class="text-xs text-gray-500 mt-2">
-        Smart Search uses AI to find semantically similar jobs (requires embeddings)
-      </p>
-    </div>
-
-    <!-- Table -->
-    <div class="bg-white rounded-lg shadow-sm overflow-hidden">
-      <div class="overflow-x-auto">
-        <table class="w-full border-collapse">
-          <thead>
-            <tr>
-              <th
-                @click="toggleSort('title')"
-                class="px-4 py-3 text-left bg-gray-50 font-semibold text-gray-600 sticky top-0 cursor-pointer select-none hover:bg-gray-100 border-b border-gray-200"
-              >Title <span x-show="sortColumn === 'title'" x-text="sortDirection === 'asc' ? '↑' : '↓'"></span></th>
-              <th
-                @click="toggleSort('link')"
-                class="px-4 py-3 text-left bg-gray-50 font-semibold text-gray-600 sticky top-0 cursor-pointer select-none hover:bg-gray-100 border-b border-gray-200"
-              >Link <span x-show="sortColumn === 'link'" x-text="sortDirection === 'asc' ? '↑' : '↓'"></span></th>
-              <th
-                @click="toggleSort('salary_min')"
-                class="px-4 py-3 text-left bg-gray-50 font-semibold text-gray-600 sticky top-0 cursor-pointer select-none hover:bg-gray-100 border-b border-gray-200"
-              >Salary <span x-show="sortColumn === 'salary_min'" x-text="sortDirection === 'asc' ? '↑' : '↓'"></span></th>
-              <th
-                @click="toggleSort('description')"
-                class="px-4 py-3 text-left bg-gray-50 font-semibold text-gray-600 sticky top-0 cursor-pointer select-none hover:bg-gray-100 border-b border-gray-200"
-              >Description <span x-show="sortColumn === 'description'" x-text="sortDirection === 'asc' ? '↑' : '↓'"></span></th>
-              <th
-                @click="toggleSort('email_date')"
-                class="px-4 py-3 text-left bg-gray-50 font-semibold text-gray-600 sticky top-0 cursor-pointer select-none hover:bg-gray-100 border-b border-gray-200"
-              >Date <span x-show="sortColumn === 'email_date'" x-text="sortDirection === 'asc' ? '↑' : '↓'"></span></th>
-            </tr>
-          </thead>
-          <tbody>
-            <!-- Loading state -->
-            <template x-if="loading">
-              <tr>
-                <td colspan="5" class="text-center p-10 text-gray-500">Loading jobs...</td>
-              </tr>
-            </template>
-
-            <!-- Error state -->
-            <template x-if="error">
-              <tr>
-                <td colspan="5" class="bg-red-50 text-red-600 p-5 rounded-lg" x-text="error"></td>
-              </tr>
-            </template>
-
-            <!-- Empty state -->
-            <template x-if="!loading && !error && filteredJobs.length === 0">
-              <tr>
-                <td colspan="5" class="text-center py-16 px-5 text-gray-500">
-                  <h3 class="text-lg font-semibold text-gray-800 mb-2">No jobs found</h3>
-                  <p>Try adjusting your search or run the job scanner to fetch new jobs.</p>
-                </td>
-              </tr>
-            </template>
-
-            <!-- Job rows -->
-            <template x-for="job in paginatedJobs" :key="job.id">
-              <tr class="cursor-pointer hover:bg-gray-50 border-b border-gray-100" @click="openModal(job)">
-                <td class="px-4 py-3 font-medium text-gray-800 max-w-xs truncate" x-text="job.title || 'Untitled'"></td>
-                <td class="px-4 py-3">
-                  <span class="text-primary-500 max-w-[200px] inline-block truncate" :title="job.link" x-text="getDomain(job.link)"></span>
-                </td>
-                <td class="px-4 py-3 whitespace-nowrap font-mono text-sm" x-html="formatSalaryHtml(job)"></td>
-                <td class="px-4 py-3 max-w-xs truncate text-sm">
-                  <template x-if="job.description">
-                    <span class="text-green-600" x-text="job.description.substring(0, 100) + '...'"></span>
-                  </template>
-                  <template x-if="!job.description">
-                    <span class="text-gray-400 italic">No description</span>
-                  </template>
-                </td>
-                <td class="px-4 py-3 whitespace-nowrap text-gray-500 text-sm" x-text="formatDate(job.email_date || job.created_at)"></td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
+        <button
+          class="px-5 py-2.5 rounded-md font-medium text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 inline-flex items-center gap-2 transition-all hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-60 disabled:cursor-not-allowed"
+          @click="generateEmbeddings()"
+          :disabled="generatingEmbeddings"
+        >
+          <template x-if="generatingEmbeddings">
+            <div
+              class="w-4 h-4 border-2 border-gray-400 border-t-gray-700 rounded-full animate-spin-fast"
+            ></div>
+          </template>
+          <span
+            x-text="generatingEmbeddings ? 'Generating...' : 'Generate Embeddings'"
+          ></span>
+        </button>
+        <button
+          class="px-5 py-2.5 rounded-md font-medium text-sm bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 inline-flex items-center gap-2 transition-all hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-60 disabled:cursor-not-allowed"
+          @click="resetDatabase()"
+          :disabled="resetting"
+        >
+          <template x-if="resetting">
+            <div
+              class="w-4 h-4 border-2 border-red-400 border-t-red-700 rounded-full animate-spin-fast"
+            ></div>
+          </template>
+          <span x-text="resetting ? 'Resetting...' : 'Reset Database'"></span>
+        </button>
+        <button
+          class="px-5 py-2.5 rounded-md font-medium text-sm bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 inline-flex items-center gap-2 transition-all hover:bg-yellow-200 dark:hover:bg-yellow-900/50"
+          @click="openBlacklistModal()"
+        >
+          Blacklist
+        </button>
+        <span
+          class="text-sm"
+          :class="{ 'text-green-600 dark:text-green-400': scanResult?.success || embeddingResult?.success || resetResult?.success, 'text-red-600 dark:text-red-400': (scanResult && !scanResult.success) || (embeddingResult && !embeddingResult.success) || (resetResult && !resetResult.success), 'text-gray-500 dark:text-gray-400': !scanResult && !embeddingResult && !resetResult }"
+          x-text="statusMessage"
+        ></span>
       </div>
 
-      <!-- Pagination controls -->
-      <div x-show="totalPages > 1" class="flex items-center justify-between px-4 py-3 bg-gray-50 border-t border-gray-200">
-        <div class="text-sm text-gray-500">
-          Showing <span x-text="((currentPage - 1) * pageSize) + 1"></span>-<span x-text="Math.min(currentPage * pageSize, filteredJobs.length)"></span> of <span x-text="filteredJobs.length"></span> jobs
+      <!-- Scan Progress Panel -->
+      <div
+        x-show="scanning || scannedEmails.length > 0"
+        class="bg-white dark:bg-gray-800 p-5 rounded-lg mb-5 shadow-sm dark:shadow-md"
+      >
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-gray-800 dark:text-gray-200">
+            <span x-show="scanning">Scanning Emails...</span>
+            <span x-show="!scanning && scannedEmails.length > 0"
+              >Scan Results</span
+            >
+          </h3>
+          <button
+            x-show="!scanning && scannedEmails.length > 0"
+            @click="scannedEmails = []"
+            class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+          >
+            Clear
+          </button>
         </div>
-        <div class="flex items-center gap-2">
-          <button
-            @click="currentPage = 1"
-            :disabled="currentPage === 1"
-            class="px-3 py-1.5 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          >First</button>
-          <button
-            @click="currentPage--"
-            :disabled="currentPage === 1"
-            class="px-3 py-1.5 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          >Prev</button>
-          <span class="px-3 py-1.5 text-sm">
-            Page <span x-text="currentPage"></span> of <span x-text="totalPages"></span>
-          </span>
-          <button
-            @click="currentPage++"
-            :disabled="currentPage >= totalPages"
-            class="px-3 py-1.5 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          >Next</button>
-          <button
-            @click="currentPage = totalPages"
-            :disabled="currentPage >= totalPages"
-            class="px-3 py-1.5 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          >Last</button>
+
+        <!-- Progress bar -->
+        <div
+          x-show="scanning && scanProgress && scanProgress.total > 0"
+          class="mb-3"
+        >
+          <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+            <div
+              class="bg-primary-500 h-2 rounded-full transition-all"
+              :style="`width: ${scanProgress && scanProgress.total ? (scanProgress.current / scanProgress.total) * 100 : 0}%`"
+            ></div>
+          </div>
+          <p
+            class="text-xs text-gray-500 dark:text-gray-400 mt-1"
+            x-text="scanProgress ? scanProgress.message : ''"
+          ></p>
+        </div>
+
+        <!-- Scanned emails list -->
+        <div x-show="scannedEmails.length > 0" class="max-h-48 overflow-y-auto">
+          <template x-for="email in scannedEmails" :key="email.id">
+            <div
+              class="flex items-center gap-3 py-2 border-b border-gray-100 dark:border-gray-700 last:border-0"
+            >
+              <span
+                class="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-xs"
+                :class="email.isJobRelated ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'"
+              >
+                <span x-text="email.isJobRelated ? '✓' : '✗'"></span>
+              </span>
+              <div class="flex-1 min-w-0">
+                <p
+                  class="text-sm font-medium text-gray-800 dark:text-gray-200 truncate"
+                  x-text="email.subject || 'No subject'"
+                ></p>
+                <p
+                  class="text-xs text-gray-500 dark:text-gray-400 truncate"
+                  x-text="email.from || 'Unknown sender'"
+                ></p>
+              </div>
+              <span
+                class="flex-shrink-0 text-xs px-2 py-0.5 rounded"
+                :class="{
+                'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400': email.confidence === 'high',
+                'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400': email.confidence === 'medium',
+                'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400': email.confidence === 'low'
+              }"
+                x-text="email.confidence"
+              ></span>
+            </div>
+          </template>
+        </div>
+
+        <!-- Empty state when no emails processed -->
+        <div
+          x-show="!scanning && scannedEmails.length === 0 && scanResult"
+          class="text-center py-4 text-gray-500 dark:text-gray-400"
+        >
+          <p
+            x-text="scanResult ? (scanResult.message || 'No new emails to process') : ''"
+          ></p>
         </div>
       </div>
-    </div>
 
-    <!-- Footer -->
-    <footer class="text-center p-5 text-gray-500 text-sm">
-      Job Seeker - Automated job tracking from Gmail
-    </footer>
+      <!-- Search -->
+      <div
+        class="bg-white dark:bg-gray-800 p-5 rounded-lg mb-5 shadow-sm dark:shadow-md"
+      >
+        <div class="flex items-center gap-4 flex-wrap">
+          <input
+            type="text"
+            x-model="searchTerm"
+            @input="currentPage = 1"
+            @keydown.enter="smartSearchEnabled ? performSmartSearch() : null"
+            :placeholder="smartSearchEnabled ? 'Semantic search (press Enter)...' : 'Search jobs by title, link, or description...'"
+            class="px-4 py-2.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-md w-full max-w-md text-base focus:outline-none focus:border-primary-500 dark:focus:border-primary-400 focus:ring-2 focus:ring-primary-500/10 dark:focus:ring-primary-400/20"
+          />
+          <label class="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              x-model="smartSearchEnabled"
+              @change="if (!smartSearchEnabled) fetchJobs()"
+              class="w-4 h-4 text-primary-500 rounded focus:ring-primary-500"
+            />
+            <span class="text-sm text-gray-600 dark:text-gray-300"
+              >Smart Search</span
+            >
+          </label>
+          <button
+            x-show="smartSearchEnabled && searchTerm"
+            @click="performSmartSearch()"
+            :disabled="searching"
+            class="px-4 py-2 rounded-md font-medium text-sm bg-primary-500 text-white hover:bg-primary-600 disabled:opacity-60 inline-flex items-center gap-2"
+          >
+            <template x-if="searching">
+              <div
+                class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin-fast"
+              ></div>
+            </template>
+            <span>Search</span>
+          </button>
+        </div>
+        <p
+          x-show="smartSearchEnabled"
+          class="text-xs text-gray-500 dark:text-gray-400 mt-2"
+        >
+          Smart Search uses AI to find semantically similar jobs (requires
+          embeddings)
+        </p>
+      </div>
 
-    <!-- Modal for job details -->
-    <div
-      class="fixed inset-0 bg-black/50 z-50 overflow-y-auto p-5 hidden"
-      :class="{ '!flex justify-center items-start': modalOpen }"
-      @click.self="closeModal()"
-      @keydown.escape.window="closeModal()"
-    >
-      <div class="bg-white rounded-xl max-w-3xl w-full my-10 shadow-2xl animate-modal" x-show="selectedJob">
-        <!-- Modal header -->
-        <div class="bg-gradient-to-br from-primary-500 to-primary-700 text-white p-6 rounded-t-xl">
-          <h2 class="text-xl font-semibold mb-4 leading-tight" x-text="selectedJob?.title || 'Untitled'"></h2>
-          <div class="flex flex-wrap gap-4 text-sm">
-            <div class="flex items-center gap-1.5">
-              <strong class="opacity-80">Link:</strong>
-              <a :href="selectedJob?.link" target="_blank" class="underline" x-text="getDomain(selectedJob?.link || '')">View Job</a>
-            </div>
-            <div class="flex items-center gap-1.5">
-              <strong class="opacity-80">Salary:</strong>
-              <span x-text="formatSalaryText(selectedJob)"></span>
-            </div>
-            <div class="flex items-center gap-1.5">
-              <strong class="opacity-80">Date:</strong>
-              <span x-text="formatDate(selectedJob?.created_at)"></span>
-            </div>
+      <!-- Table -->
+      <div
+        class="bg-white dark:bg-gray-800 rounded-lg shadow-sm dark:shadow-md overflow-hidden"
+      >
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse">
+            <thead>
+              <tr>
+                <th
+                  @click="toggleSort('title')"
+                  class="px-4 py-3 text-left bg-gray-50 dark:bg-gray-900 font-semibold text-gray-600 dark:text-gray-300 sticky top-0 cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
+                >
+                  Title
+                  <span
+                    x-show="sortColumn === 'title'"
+                    x-text="sortDirection === 'asc' ? '↑' : '↓'"
+                  ></span>
+                </th>
+                <th
+                  @click="toggleSort('link')"
+                  class="px-4 py-3 text-left bg-gray-50 dark:bg-gray-900 font-semibold text-gray-600 dark:text-gray-300 sticky top-0 cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
+                >
+                  Link
+                  <span
+                    x-show="sortColumn === 'link'"
+                    x-text="sortDirection === 'asc' ? '↑' : '↓'"
+                  ></span>
+                </th>
+                <th
+                  @click="toggleSort('salary_min')"
+                  class="px-4 py-3 text-left bg-gray-50 dark:bg-gray-900 font-semibold text-gray-600 dark:text-gray-300 sticky top-0 cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
+                >
+                  Salary
+                  <span
+                    x-show="sortColumn === 'salary_min'"
+                    x-text="sortDirection === 'asc' ? '↑' : '↓'"
+                  ></span>
+                </th>
+                <th
+                  @click="toggleSort('description')"
+                  class="px-4 py-3 text-left bg-gray-50 dark:bg-gray-900 font-semibold text-gray-600 dark:text-gray-300 sticky top-0 cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
+                >
+                  Description
+                  <span
+                    x-show="sortColumn === 'description'"
+                    x-text="sortDirection === 'asc' ? '↑' : '↓'"
+                  ></span>
+                </th>
+                <th
+                  @click="toggleSort('email_date')"
+                  class="px-4 py-3 text-left bg-gray-50 dark:bg-gray-900 font-semibold text-gray-600 dark:text-gray-300 sticky top-0 cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
+                >
+                  Date
+                  <span
+                    x-show="sortColumn === 'email_date'"
+                    x-text="sortDirection === 'asc' ? '↑' : '↓'"
+                  ></span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Loading state -->
+              <template x-if="loading">
+                <tr>
+                  <td
+                    colspan="5"
+                    class="text-center p-10 text-gray-500 dark:text-gray-400"
+                  >
+                    Loading jobs...
+                  </td>
+                </tr>
+              </template>
+
+              <!-- Error state -->
+              <template x-if="error">
+                <tr>
+                  <td
+                    colspan="5"
+                    class="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-5 rounded-lg"
+                    x-text="error"
+                  ></td>
+                </tr>
+              </template>
+
+              <!-- Empty state -->
+              <template x-if="!loading && !error && filteredJobs.length === 0">
+                <tr>
+                  <td
+                    colspan="5"
+                    class="text-center py-16 px-5 text-gray-500 dark:text-gray-400"
+                  >
+                    <h3
+                      class="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2"
+                    >
+                      No jobs found
+                    </h3>
+                    <p>
+                      Try adjusting your search or run the job scanner to fetch
+                      new jobs.
+                    </p>
+                  </td>
+                </tr>
+              </template>
+
+              <!-- Job rows -->
+              <template x-for="job in paginatedJobs" :key="job.id">
+                <tr
+                  class="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700"
+                  @click="openModal(job)"
+                >
+                  <td
+                    class="px-4 py-3 font-medium text-gray-800 dark:text-gray-200 max-w-xs truncate"
+                    x-text="job.title || 'Untitled'"
+                  ></td>
+                  <td class="px-4 py-3">
+                    <span
+                      class="text-primary-500 dark:text-primary-400 max-w-[200px] inline-block truncate"
+                      :title="job.link"
+                      x-text="getDomain(job.link)"
+                    ></span>
+                  </td>
+                  <td
+                    class="px-4 py-3 whitespace-nowrap font-mono text-sm"
+                    x-html="formatSalaryHtml(job)"
+                  ></td>
+                  <td class="px-4 py-3 max-w-xs truncate text-sm">
+                    <template x-if="job.description">
+                      <span
+                        class="text-green-600 dark:text-green-400"
+                        x-text="job.description.substring(0, 100) + '...'"
+                      ></span>
+                    </template>
+                    <template x-if="!job.description">
+                      <span class="text-gray-400 dark:text-gray-500 italic"
+                        >No description</span
+                      >
+                    </template>
+                  </td>
+                  <td
+                    class="px-4 py-3 whitespace-nowrap text-gray-500 dark:text-gray-400 text-sm"
+                    x-text="formatDate(job.email_date || job.created_at)"
+                  ></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination controls -->
+        <div
+          x-show="totalPages > 1"
+          class="flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700"
+        >
+          <div class="text-sm text-gray-500 dark:text-gray-400">
+            Showing
+            <span x-text="((currentPage - 1) * pageSize) + 1"></span>-<span
+              x-text="Math.min(currentPage * pageSize, filteredJobs.length)"
+            ></span>
+            of <span x-text="filteredJobs.length"></span> jobs
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              @click="currentPage = 1"
+              :disabled="currentPage === 1"
+              class="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              First
+            </button>
+            <button
+              @click="currentPage--"
+              :disabled="currentPage === 1"
+              class="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Prev
+            </button>
+            <span class="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300">
+              Page <span x-text="currentPage"></span> of
+              <span x-text="totalPages"></span>
+            </span>
+            <button
+              @click="currentPage++"
+              :disabled="currentPage >= totalPages"
+              class="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+            <button
+              @click="currentPage = totalPages"
+              :disabled="currentPage >= totalPages"
+              class="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Last
+            </button>
           </div>
         </div>
+      </div>
 
-        <!-- Modal body -->
-        <div class="p-6 max-h-[60vh] overflow-y-auto prose prose-sm max-w-none" x-html="renderDescription(selectedJob)">
+      <!-- Footer -->
+      <footer class="text-center p-5 text-gray-500 dark:text-gray-400 text-sm">
+        Job Seeker - Automated job tracking from Gmail
+      </footer>
+
+      <!-- Modal for job details -->
+      <div
+        class="fixed inset-0 bg-black/50 dark:bg-black/70 z-50 overflow-y-auto p-5 hidden"
+        :class="{ '!flex justify-center items-start': modalOpen }"
+        @click.self="closeModal()"
+        @keydown.escape.window="closeModal()"
+      >
+        <div
+          class="bg-white dark:bg-gray-800 rounded-xl max-w-3xl w-full my-10 shadow-2xl animate-modal"
+          x-show="selectedJob"
+        >
+          <!-- Modal header -->
+          <div
+            class="bg-gradient-to-br from-primary-500 to-primary-700 text-white p-6 rounded-t-xl"
+          >
+            <h2
+              class="text-xl font-semibold mb-4 leading-tight"
+              x-text="selectedJob?.title || 'Untitled'"
+            ></h2>
+            <div class="flex flex-wrap gap-4 text-sm">
+              <div class="flex items-center gap-1.5">
+                <strong class="opacity-80">Link:</strong>
+                <a
+                  :href="selectedJob?.link"
+                  target="_blank"
+                  class="underline"
+                  x-text="getDomain(selectedJob?.link || '')"
+                  >View Job</a
+                >
+              </div>
+              <div class="flex items-center gap-1.5">
+                <strong class="opacity-80">Salary:</strong>
+                <span x-text="formatSalaryText(selectedJob)"></span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <strong class="opacity-80">Date:</strong>
+                <span x-text="formatDate(selectedJob?.created_at)"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Modal body -->
+          <div
+            class="p-6 max-h-[60vh] overflow-y-auto prose prose-sm dark:prose-invert max-w-none prose-headings:text-gray-800 dark:prose-headings:text-gray-200 prose-p:text-gray-700 dark:prose-p:text-gray-300"
+            x-html="renderDescription(selectedJob)"
+          ></div>
+
+          <!-- Modal footer -->
+          <div
+            class="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3"
+          >
+            <button
+              class="px-5 py-2.5 rounded-md font-medium text-sm bg-red-600 dark:bg-red-700 text-white hover:bg-red-700 dark:hover:bg-red-800 transition-colors"
+              @click="deleteJob()"
+            >
+              Delete
+            </button>
+            <div class="flex-1"></div>
+            <button
+              class="px-5 py-2.5 rounded-md font-medium text-sm bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              @click="closeModal()"
+            >
+              Close
+            </button>
+            <a
+              :href="selectedJob?.link"
+              target="_blank"
+              class="px-5 py-2.5 rounded-md font-medium text-sm bg-primary-500 dark:bg-primary-600 text-white hover:bg-primary-600 dark:hover:bg-primary-700 transition-colors no-underline"
+              >Open Job Page</a
+            >
+          </div>
         </div>
+      </div>
 
-        <!-- Modal footer -->
-        <div class="p-4 border-t border-gray-200 flex justify-end gap-3">
-          <button class="px-5 py-2.5 rounded-md font-medium text-sm bg-red-600 text-white hover:bg-red-700 transition-colors" @click="deleteJob()">Delete</button>
-          <div class="flex-1"></div>
-          <button class="px-5 py-2.5 rounded-md font-medium text-sm bg-gray-100 text-gray-800 hover:bg-gray-200 transition-colors" @click="closeModal()">Close</button>
-          <a :href="selectedJob?.link" target="_blank" class="px-5 py-2.5 rounded-md font-medium text-sm bg-primary-500 text-white hover:bg-primary-600 transition-colors no-underline">Open Job Page</a>
+      <!-- Blacklist Modal -->
+      <div
+        class="fixed inset-0 bg-black/50 dark:bg-black/70 z-50 overflow-y-auto p-5 hidden"
+        :class="{ '!flex justify-center items-start': blacklistModalOpen }"
+        @click.self="closeBlacklistModal()"
+        @keydown.escape.window="closeBlacklistModal()"
+      >
+        <div
+          class="bg-white dark:bg-gray-800 rounded-xl max-w-xl w-full my-10 shadow-2xl animate-modal"
+        >
+          <!-- Modal header -->
+          <div
+            class="bg-gradient-to-br from-yellow-500 to-yellow-600 text-white p-6 rounded-t-xl"
+          >
+            <h2 class="text-xl font-semibold">Blacklist Keywords</h2>
+            <p class="text-sm opacity-80 mt-1">
+              Jobs containing these keywords (or synonyms) will be excluded
+            </p>
+          </div>
+
+          <!-- Modal body -->
+          <div class="p-6">
+            <textarea
+              x-model="blacklistText"
+              placeholder="Enter keywords, one per line...&#10;&#10;Example:&#10;internship&#10;junior&#10;entry level"
+              class="w-full h-64 px-4 py-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-md text-sm font-mono focus:outline-none focus:border-yellow-500 dark:focus:border-yellow-400 focus:ring-2 focus:ring-yellow-500/10 dark:focus:ring-yellow-400/20 resize-none"
+            ></textarea>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              Keywords are matched using semantic similarity, so synonyms will
+              also be detected.
+            </p>
+            <div
+              x-show="blacklistResult"
+              class="mt-3 text-sm"
+              :class="blacklistResult?.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+            >
+              <span
+                x-text="blacklistResult?.message || blacklistResult?.error"
+              ></span>
+            </div>
+          </div>
+
+          <!-- Modal footer -->
+          <div
+            class="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3"
+          >
+            <button
+              class="px-5 py-2.5 rounded-md font-medium text-sm bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              @click="closeBlacklistModal()"
+            >
+              Cancel
+            </button>
+            <button
+              class="px-5 py-2.5 rounded-md font-medium text-sm bg-yellow-500 dark:bg-yellow-600 text-white hover:bg-yellow-600 dark:hover:bg-yellow-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
+              @click="saveBlacklist()"
+              :disabled="savingBlacklist"
+            >
+              <template x-if="savingBlacklist">
+                <div
+                  class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin-fast"
+                ></div>
+              </template>
+              <span
+                x-text="savingBlacklist ? 'Saving...' : 'Save Blacklist'"
+              ></span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- Alpine.js -->
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Alpine.js -->
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
+    ></script>
 
-  <!-- Markdown parser (marked.js) -->
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Markdown parser (marked.js) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-  <script>
-    function jobApp() {
-      return {
-        jobs: [],
-        searchTerm: '',
-        sortColumn: 'email_date',
-        sortDirection: 'desc',
-        loading: true,
-        error: null,
-        modalOpen: false,
-        selectedJob: null,
-        scanning: false,
-        scanResult: null,
-        generatingEmbeddings: false,
-        embeddingResult: null,
-        smartSearchEnabled: false,
-        searching: false,
-        resetting: false,
-        resetResult: null,
-        ws: null,
-        scannedEmails: [],
-        scanProgress: null,
-        currentPage: 1,
-        pageSize: 20,
+    <script>
+      function jobApp() {
+        return {
+          jobs: [],
+          searchTerm: "",
+          sortColumn: "email_date",
+          sortDirection: "desc",
+          loading: true,
+          error: null,
+          modalOpen: false,
+          selectedJob: null,
+          scanning: false,
+          scanResult: null,
+          generatingEmbeddings: false,
+          embeddingResult: null,
+          smartSearchEnabled: false,
+          searching: false,
+          resetting: false,
+          resetResult: null,
+          ws: null,
+          scannedEmails: [],
+          scanProgress: null,
+          currentPage: 1,
+          pageSize: 20,
+          blacklistModalOpen: false,
+          blacklistText: "",
+          savingBlacklist: false,
+          blacklistResult: null,
+          darkMode: false,
 
-        // Computed properties
-        get jobsWithSalary() {
-          return this.jobs.filter(j => j.salary_min !== null).length;
-        },
+          // Computed properties
+          get jobsWithSalary() {
+            return this.jobs.filter((j) => j.salary_min !== null).length;
+          },
 
-        get jobsWithDescription() {
-          return this.jobs.filter(j => j.description !== null).length;
-        },
+          get jobsWithDescription() {
+            return this.jobs.filter((j) => j.description !== null).length;
+          },
 
-        get totalPages() {
-          return Math.ceil(this.filteredJobs.length / this.pageSize);
-        },
+          get totalPages() {
+            return Math.ceil(this.filteredJobs.length / this.pageSize);
+          },
 
-        get paginatedJobs() {
-          const start = (this.currentPage - 1) * this.pageSize;
-          const end = start + this.pageSize;
-          return this.filteredJobs.slice(start, end);
-        },
+          get paginatedJobs() {
+            const start = (this.currentPage - 1) * this.pageSize;
+            const end = start + this.pageSize;
+            return this.filteredJobs.slice(start, end);
+          },
 
-        get statusMessage() {
-          // Show real-time scan progress if scanning
-          if (this.scanning && this.scanProgress) {
-            return this.scanProgress.message;
-          }
-          if (this.resetResult) {
-            if (this.resetResult.success) {
-              return this.resetResult.message;
+          get statusMessage() {
+            // Show real-time scan progress if scanning
+            if (this.scanning && this.scanProgress) {
+              return this.scanProgress.message;
             }
-            return this.resetResult.error || 'Reset failed';
-          }
-          if (this.embeddingResult) {
-            if (this.embeddingResult.success) {
-              return this.embeddingResult.message;
-            }
-            return this.embeddingResult.error || 'Embedding generation failed';
-          }
-          if (this.scanResult) {
-            if (this.scanResult.success) {
-              if (this.scanResult.processed === 0) {
-                return this.scanResult.message;
+            if (this.resetResult) {
+              if (this.resetResult.success) {
+                return this.resetResult.message;
               }
-              return `Processed ${this.scanResult.processed} emails, ${this.scanResult.jobRelated} job-related`;
+              return this.resetResult.error || "Reset failed";
             }
-            return this.scanResult.error || 'Scan failed';
-          }
-          return '';
-        },
-
-        get filteredJobs() {
-          let result = this.jobs;
-
-          // Skip client-side filtering if using smart search (server handles it)
-          if (this.smartSearchEnabled) {
-            // For smart search, just sort by similarity if available
-            if (result.length > 0 && result[0].similarity !== undefined) {
-              return result; // Already sorted by similarity from server
-            }
-          }
-
-          // Filter by search term (client-side)
-          if (this.searchTerm && !this.smartSearchEnabled) {
-            const term = this.searchTerm.toLowerCase();
-            result = result.filter(job =>
-              (job.title && job.title.toLowerCase().includes(term)) ||
-              (job.link && job.link.toLowerCase().includes(term)) ||
-              (job.description && job.description.toLowerCase().includes(term))
-            );
-          }
-
-          // Sort
-          return [...result].sort((a, b) => {
-            let aVal = a[this.sortColumn];
-            let bVal = b[this.sortColumn];
-
-            // Handle null values
-            if (aVal === null || aVal === undefined) aVal = '';
-            if (bVal === null || bVal === undefined) bVal = '';
-
-            // Compare
-            if (typeof aVal === 'string') {
-              aVal = aVal.toLowerCase();
-              bVal = bVal.toLowerCase();
-            }
-
-            if (aVal < bVal) return this.sortDirection === 'asc' ? -1 : 1;
-            if (aVal > bVal) return this.sortDirection === 'asc' ? 1 : -1;
-            return 0;
-          });
-        },
-
-        // Methods
-        async init() {
-          console.debug('Initializing app...');
-          await this.fetchJobs();
-          this.connectWebSocket();
-          console.debug('App initialized');
-        },
-
-        connectWebSocket() {
-          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-          const wsUrl = `${protocol}//${window.location.host}`;
-
-          console.debug('Connecting to WebSocket:', wsUrl);
-          this.ws = new WebSocket(wsUrl);
-
-          this.ws.onopen = () => {
-            console.debug('WebSocket connected, readyState:', this.ws.readyState);
-          };
-
-          this.ws.onmessage = (event) => {
-            console.debug('WebSocket raw message:', event.data);
-            const data = JSON.parse(event.data);
-            this.handleWebSocketMessage(data);
-          };
-
-          this.ws.onclose = (event) => {
-            console.debug('WebSocket disconnected, code:', event.code, 'reason:', event.reason);
-            setTimeout(() => this.connectWebSocket(), 3000);
-          };
-
-          this.ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-          };
-        },
-
-        handleWebSocketMessage(data) {
-          console.debug('WebSocket message:', data.type, data);
-          switch (data.type) {
-            case 'scan_progress':
-              this.scanProgress = data;
-              break;
-
-            case 'email_processed':
-              console.debug('Email processed:', data.email);
-              // Add to scanned emails list (avoid duplicates)
-              if (!this.scannedEmails.some(e => e.id === data.email.id)) {
-                this.scannedEmails.unshift(data.email);
-                console.debug('Added to list, total:', this.scannedEmails.length);
+            if (this.embeddingResult) {
+              if (this.embeddingResult.success) {
+                return this.embeddingResult.message;
               }
-              break;
+              return (
+                this.embeddingResult.error || "Embedding generation failed"
+              );
+            }
+            if (this.scanResult) {
+              if (this.scanResult.success) {
+                if (this.scanResult.processed === 0) {
+                  return this.scanResult.message;
+                }
+                return `Processed ${this.scanResult.processed} emails, ${this.scanResult.jobRelated} job-related`;
+              }
+              return this.scanResult.error || "Scan failed";
+            }
+            return "";
+          },
 
-            case 'scan_complete':
-              this.scanResult = data.result;
+          get filteredJobs() {
+            let result = this.jobs;
+
+            // Skip client-side filtering if using smart search (server handles it)
+            if (this.smartSearchEnabled) {
+              // For smart search, just sort by similarity if available
+              if (result.length > 0 && result[0].similarity !== undefined) {
+                return result; // Already sorted by similarity from server
+              }
+            }
+
+            // Filter by search term (client-side)
+            if (this.searchTerm && !this.smartSearchEnabled) {
+              const term = this.searchTerm.toLowerCase();
+              result = result.filter(
+                (job) =>
+                  (job.title && job.title.toLowerCase().includes(term)) ||
+                  (job.link && job.link.toLowerCase().includes(term)) ||
+                  (job.description &&
+                    job.description.toLowerCase().includes(term))
+              );
+            }
+
+            // Sort
+            return [...result].sort((a, b) => {
+              let aVal = a[this.sortColumn];
+              let bVal = b[this.sortColumn];
+
+              // Handle null values
+              if (aVal === null || aVal === undefined) aVal = "";
+              if (bVal === null || bVal === undefined) bVal = "";
+
+              // Compare
+              if (typeof aVal === "string") {
+                aVal = aVal.toLowerCase();
+                bVal = bVal.toLowerCase();
+              }
+
+              if (aVal < bVal) return this.sortDirection === "asc" ? -1 : 1;
+              if (aVal > bVal) return this.sortDirection === "asc" ? 1 : -1;
+              return 0;
+            });
+          },
+
+          // Methods
+          async init() {
+            console.debug("Initializing app...");
+            // Initialize dark mode from localStorage or system preference
+            const savedDarkMode = localStorage.getItem("darkMode");
+            if (savedDarkMode !== null) {
+              this.darkMode = savedDarkMode === "true";
+            } else {
+              // Check system preference
+              this.darkMode = window.matchMedia(
+                "(prefers-color-scheme: dark)"
+              ).matches;
+            }
+            this.applyDarkMode();
+            await this.fetchJobs();
+            this.connectWebSocket();
+            console.debug("App initialized");
+          },
+
+          toggleDarkMode() {
+            this.darkMode = !this.darkMode;
+            this.applyDarkMode();
+            localStorage.setItem("darkMode", this.darkMode.toString());
+          },
+
+          applyDarkMode() {
+            if (this.darkMode) {
+              document.documentElement.classList.add("dark");
+            } else {
+              document.documentElement.classList.remove("dark");
+            }
+          },
+
+          connectWebSocket() {
+            const protocol =
+              window.location.protocol === "https:" ? "wss:" : "ws:";
+            const wsUrl = `${protocol}//${window.location.host}`;
+
+            console.debug("Connecting to WebSocket:", wsUrl);
+            this.ws = new WebSocket(wsUrl);
+
+            this.ws.onopen = () => {
+              console.debug(
+                "WebSocket connected, readyState:",
+                this.ws.readyState
+              );
+            };
+
+            this.ws.onmessage = (event) => {
+              console.debug("WebSocket raw message:", event.data);
+              const data = JSON.parse(event.data);
+              this.handleWebSocketMessage(data);
+            };
+
+            this.ws.onclose = (event) => {
+              console.debug(
+                "WebSocket disconnected, code:",
+                event.code,
+                "reason:",
+                event.reason
+              );
+              setTimeout(() => this.connectWebSocket(), 3000);
+            };
+
+            this.ws.onerror = (error) => {
+              console.error("WebSocket error:", error);
+            };
+          },
+
+          handleWebSocketMessage(data) {
+            console.debug("WebSocket message:", data.type, data);
+            switch (data.type) {
+              case "scan_progress":
+                this.scanProgress = data;
+                break;
+
+              case "email_processed":
+                console.debug("Email processed:", data.email);
+                // Add to scanned emails list (avoid duplicates)
+                if (!this.scannedEmails.some((e) => e.id === data.email.id)) {
+                  this.scannedEmails.unshift(data.email);
+                  console.debug(
+                    "Added to list, total:",
+                    this.scannedEmails.length
+                  );
+                }
+                break;
+
+              case "scan_complete":
+                this.scanResult = data.result;
+                this.scanProgress = null;
+                // Refresh jobs list after scan completes
+                this.fetchJobs();
+                break;
+
+              case "scan_error":
+                this.scanResult = {
+                  success: false,
+                  error: data.error,
+                };
+                this.scanProgress = null;
+                break;
+            }
+          },
+
+          async fetchJobs() {
+            try {
+              this.loading = true;
+              this.error = null;
+
+              console.debug("Fetching jobs...");
+              const response = await fetch("/api/jobs?limit=500");
+              if (!response.ok) throw new Error("Failed to fetch jobs");
+
+              const data = await response.json();
+              console.debug("Jobs fetched:", data.jobs?.length || 0);
+              this.jobs = data.jobs || [];
+              this.currentPage = 1;
+            } catch (err) {
+              console.error("Error fetching jobs:", err);
+              this.error =
+                "Failed to load jobs. Make sure the server is running.";
+            } finally {
+              this.loading = false;
+            }
+          },
+
+          toggleSort(column) {
+            if (this.sortColumn === column) {
+              this.sortDirection =
+                this.sortDirection === "asc" ? "desc" : "asc";
+            } else {
+              this.sortColumn = column;
+              this.sortDirection = "asc";
+            }
+            this.currentPage = 1;
+          },
+
+          openModal(job) {
+            this.selectedJob = job;
+            this.modalOpen = true;
+            document.body.style.overflow = "hidden";
+          },
+
+          closeModal() {
+            this.modalOpen = false;
+            this.selectedJob = null;
+            document.body.style.overflow = "";
+          },
+
+          async startScan() {
+            if (this.scanning) return;
+
+            try {
+              this.scanning = true;
+              this.scanResult = null;
+              this.embeddingResult = null;
+              this.resetResult = null;
+              this.scannedEmails = [];
               this.scanProgress = null;
-              // Refresh jobs list after scan completes
-              this.fetchJobs();
-              break;
 
-            case 'scan_error':
+              const response = await fetch("/api/scan", {
+                method: "POST",
+              });
+
+              const result = await response.json();
+              // Result will also come via WebSocket, but we handle HTTP response for non-WS clients
+              if (!this.scanResult) {
+                this.scanResult = result;
+                // Refresh jobs list
+                await this.fetchJobs();
+              }
+            } catch (err) {
+              console.error("Error during scan:", err);
               this.scanResult = {
                 success: false,
-                error: data.error
+                error: "Failed to start scan. Is the server running?",
               };
-              this.scanProgress = null;
-              break;
-          }
-        },
-
-        async fetchJobs() {
-          try {
-            this.loading = true;
-            this.error = null;
-
-            console.debug('Fetching jobs...');
-            const response = await fetch('/api/jobs?limit=500');
-            if (!response.ok) throw new Error('Failed to fetch jobs');
-
-            const data = await response.json();
-            console.debug('Jobs fetched:', data.jobs?.length || 0);
-            this.jobs = data.jobs || [];
-            this.currentPage = 1;
-          } catch (err) {
-            console.error('Error fetching jobs:', err);
-            this.error = 'Failed to load jobs. Make sure the server is running.';
-          } finally {
-            this.loading = false;
-          }
-        },
-
-        toggleSort(column) {
-          if (this.sortColumn === column) {
-            this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc';
-          } else {
-            this.sortColumn = column;
-            this.sortDirection = 'asc';
-          }
-          this.currentPage = 1;
-        },
-
-        openModal(job) {
-          this.selectedJob = job;
-          this.modalOpen = true;
-          document.body.style.overflow = 'hidden';
-        },
-
-        closeModal() {
-          this.modalOpen = false;
-          this.selectedJob = null;
-          document.body.style.overflow = '';
-        },
-
-        async startScan() {
-          if (this.scanning) return;
-
-          try {
-            this.scanning = true;
-            this.scanResult = null;
-            this.embeddingResult = null;
-            this.resetResult = null;
-            this.scannedEmails = [];
-            this.scanProgress = null;
-
-            const response = await fetch('/api/scan', {
-              method: 'POST',
-            });
-
-            const result = await response.json();
-            // Result will also come via WebSocket, but we handle HTTP response for non-WS clients
-            if (!this.scanResult) {
-              this.scanResult = result;
-              // Refresh jobs list
-              await this.fetchJobs();
+            } finally {
+              this.scanning = false;
             }
-          } catch (err) {
-            console.error('Error during scan:', err);
-            this.scanResult = {
-              success: false,
-              error: 'Failed to start scan. Is the server running?'
+          },
+
+          async generateEmbeddings() {
+            if (this.generatingEmbeddings) return;
+
+            try {
+              this.generatingEmbeddings = true;
+              this.embeddingResult = null;
+              this.scanResult = null;
+
+              const response = await fetch("/api/embeddings/generate", {
+                method: "POST",
+              });
+
+              const result = await response.json();
+              this.embeddingResult = result;
+            } catch (err) {
+              console.error("Error generating embeddings:", err);
+              this.embeddingResult = {
+                success: false,
+                error: "Failed to generate embeddings. Is Ollama running?",
+              };
+            } finally {
+              this.generatingEmbeddings = false;
+            }
+          },
+
+          async resetDatabase() {
+            if (this.resetting) return;
+
+            if (
+              !confirm(
+                "Are you sure you want to reset the database? This will delete ALL jobs, emails, and embeddings."
+              )
+            ) {
+              return;
+            }
+
+            try {
+              this.resetting = true;
+              this.resetResult = null;
+              this.scanResult = null;
+              this.embeddingResult = null;
+
+              const response = await fetch("/api/reset", {
+                method: "POST",
+              });
+
+              const result = await response.json();
+              this.resetResult = result;
+
+              // Refresh jobs list after reset
+              if (result.success) {
+                await this.fetchJobs();
+              }
+            } catch (err) {
+              console.error("Error resetting database:", err);
+              this.resetResult = {
+                success: false,
+                error: "Failed to reset database.",
+              };
+            } finally {
+              this.resetting = false;
+            }
+          },
+
+          async performSmartSearch() {
+            if (this.searching || !this.searchTerm) return;
+
+            try {
+              this.searching = true;
+              this.error = null;
+
+              const response = await fetch("/api/jobs/search", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  query: this.searchTerm,
+                  limit: 50,
+                  minSimilarity: 0.2,
+                }),
+              });
+
+              if (!response.ok) throw new Error("Search failed");
+
+              const data = await response.json();
+              this.jobs = data.jobs || [];
+              this.currentPage = 1;
+            } catch (err) {
+              console.error("Error during search:", err);
+              this.error = "Search failed. Make sure embeddings are generated.";
+            } finally {
+              this.searching = false;
+            }
+          },
+
+          async deleteJob() {
+            if (!this.selectedJob) return;
+
+            const jobTitle = this.selectedJob.title || "this job";
+            if (!confirm(`Are you sure you want to delete "${jobTitle}"?`)) {
+              return;
+            }
+
+            try {
+              const response = await fetch(`/api/jobs/${this.selectedJob.id}`, {
+                method: "DELETE",
+              });
+
+              if (!response.ok) {
+                throw new Error("Failed to delete job");
+              }
+
+              // Remove from jobs array
+              this.jobs = this.jobs.filter((j) => j.id !== this.selectedJob.id);
+
+              // Close modal
+              this.closeModal();
+            } catch (err) {
+              console.error("Error deleting job:", err);
+              alert("Failed to delete job. Please try again.");
+            }
+          },
+
+          async openBlacklistModal() {
+            try {
+              // Fetch current blacklist
+              const response = await fetch("/api/blacklist");
+              if (response.ok) {
+                const data = await response.json();
+                this.blacklistText = data.text || "";
+              }
+            } catch (err) {
+              console.error("Error fetching blacklist:", err);
+              this.blacklistText = "";
+            }
+
+            this.blacklistResult = null;
+            this.blacklistModalOpen = true;
+            document.body.style.overflow = "hidden";
+          },
+
+          closeBlacklistModal() {
+            this.blacklistModalOpen = false;
+            document.body.style.overflow = "";
+          },
+
+          async saveBlacklist() {
+            if (this.savingBlacklist) return;
+
+            try {
+              this.savingBlacklist = true;
+              this.blacklistResult = null;
+
+              const response = await fetch("/api/blacklist", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: this.blacklistText }),
+              });
+
+              const result = await response.json();
+              this.blacklistResult = result;
+
+              if (result.success) {
+                // Auto-close after success with slight delay
+                setTimeout(() => {
+                  this.closeBlacklistModal();
+                }, 1500);
+              }
+            } catch (err) {
+              console.error("Error saving blacklist:", err);
+              this.blacklistResult = {
+                success: false,
+                error: "Failed to save blacklist. Is Ollama running?",
+              };
+            } finally {
+              this.savingBlacklist = false;
+            }
+          },
+
+          // Helper methods
+          getDomain(url) {
+            if (!url) return "";
+            try {
+              const hostname = new URL(url).hostname;
+              return hostname.replace("www.", "");
+            } catch {
+              return url;
+            }
+          },
+
+          formatDate(dateStr) {
+            if (!dateStr) return "-";
+            const date = new Date(dateStr);
+            return date.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year:
+                date.getFullYear() !== new Date().getFullYear()
+                  ? "numeric"
+                  : undefined,
+            });
+          },
+
+          formatSalaryHtml(job) {
+            if (!job || (!job.salary_min && !job.salary_max)) {
+              return '<span class="text-gray-400 dark:text-gray-500 italic">-</span>';
+            }
+
+            const currency = job.salary_currency || "";
+            const period = job.salary_period
+              ? `/${job.salary_period.charAt(0)}`
+              : "";
+
+            const formatNum = (n) => {
+              if (n >= 1000) {
+                return (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + "k";
+              }
+              return n.toString();
             };
-          } finally {
-            this.scanning = false;
-          }
-        },
 
-        async generateEmbeddings() {
-          if (this.generatingEmbeddings) return;
+            if (job.salary_min === job.salary_max || !job.salary_max) {
+              return `<span class="text-green-600 dark:text-green-400 font-medium">${currency} ${formatNum(
+                job.salary_min
+              )}${period}</span>`;
+            }
 
-          try {
-            this.generatingEmbeddings = true;
-            this.embeddingResult = null;
-            this.scanResult = null;
+            return `<span class="text-green-600 dark:text-green-400 font-medium">${currency} ${formatNum(
+              job.salary_min
+            )}-${formatNum(job.salary_max)}${period}</span>`;
+          },
 
-            const response = await fetch('/api/embeddings/generate', {
-              method: 'POST',
-            });
+          formatSalaryText(job) {
+            if (!job || (!job.salary_min && !job.salary_max)) {
+              return "Not specified";
+            }
 
-            const result = await response.json();
-            this.embeddingResult = result;
-          } catch (err) {
-            console.error('Error generating embeddings:', err);
-            this.embeddingResult = {
-              success: false,
-              error: 'Failed to generate embeddings. Is Ollama running?'
+            const currency = job.salary_currency || "";
+            const period = job.salary_period || "";
+
+            const formatNum = (n) => {
+              if (n >= 1000) {
+                return (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + "k";
+              }
+              return n.toString();
             };
-          } finally {
-            this.generatingEmbeddings = false;
-          }
-        },
 
-        async resetDatabase() {
-          if (this.resetting) return;
-
-          if (!confirm('Are you sure you want to reset the database? This will delete ALL jobs, emails, and embeddings.')) {
-            return;
-          }
-
-          try {
-            this.resetting = true;
-            this.resetResult = null;
-            this.scanResult = null;
-            this.embeddingResult = null;
-
-            const response = await fetch('/api/reset', {
-              method: 'POST',
-            });
-
-            const result = await response.json();
-            this.resetResult = result;
-
-            // Refresh jobs list after reset
-            if (result.success) {
-              await this.fetchJobs();
-            }
-          } catch (err) {
-            console.error('Error resetting database:', err);
-            this.resetResult = {
-              success: false,
-              error: 'Failed to reset database.'
-            };
-          } finally {
-            this.resetting = false;
-          }
-        },
-
-        async performSmartSearch() {
-          if (this.searching || !this.searchTerm) return;
-
-          try {
-            this.searching = true;
-            this.error = null;
-
-            const response = await fetch('/api/jobs/search', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                query: this.searchTerm,
-                limit: 50,
-                minSimilarity: 0.2
-              })
-            });
-
-            if (!response.ok) throw new Error('Search failed');
-
-            const data = await response.json();
-            this.jobs = data.jobs || [];
-            this.currentPage = 1;
-          } catch (err) {
-            console.error('Error during search:', err);
-            this.error = 'Search failed. Make sure embeddings are generated.';
-          } finally {
-            this.searching = false;
-          }
-        },
-
-        async deleteJob() {
-          if (!this.selectedJob) return;
-
-          const jobTitle = this.selectedJob.title || 'this job';
-          if (!confirm(`Are you sure you want to delete "${jobTitle}"?`)) {
-            return;
-          }
-
-          try {
-            const response = await fetch(`/api/jobs/${this.selectedJob.id}`, {
-              method: 'DELETE',
-            });
-
-            if (!response.ok) {
-              throw new Error('Failed to delete job');
+            let salaryStr = "";
+            if (job.salary_min === job.salary_max || !job.salary_max) {
+              salaryStr = `${currency} ${formatNum(job.salary_min)}`;
+            } else {
+              salaryStr = `${currency} ${formatNum(
+                job.salary_min
+              )} - ${formatNum(job.salary_max)}`;
             }
 
-            // Remove from jobs array
-            this.jobs = this.jobs.filter(j => j.id !== this.selectedJob.id);
-
-            // Close modal
-            this.closeModal();
-          } catch (err) {
-            console.error('Error deleting job:', err);
-            alert('Failed to delete job. Please try again.');
-          }
-        },
-
-        // Helper methods
-        getDomain(url) {
-          if (!url) return '';
-          try {
-            const hostname = new URL(url).hostname;
-            return hostname.replace('www.', '');
-          } catch {
-            return url;
-          }
-        },
-
-        formatDate(dateStr) {
-          if (!dateStr) return '-';
-          const date = new Date(dateStr);
-          return date.toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: date.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined
-          });
-        },
-
-        formatSalaryHtml(job) {
-          if (!job || (!job.salary_min && !job.salary_max)) {
-            return '<span class="text-gray-400 italic">-</span>';
-          }
-
-          const currency = job.salary_currency || '';
-          const period = job.salary_period ? `/${job.salary_period.charAt(0)}` : '';
-
-          const formatNum = (n) => {
-            if (n >= 1000) {
-              return (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + 'k';
+            if (period) {
+              salaryStr += ` (${period})`;
             }
-            return n.toString();
-          };
 
-          if (job.salary_min === job.salary_max || !job.salary_max) {
-            return `<span class="text-green-600 font-medium">${currency} ${formatNum(job.salary_min)}${period}</span>`;
-          }
+            return salaryStr;
+          },
 
-          return `<span class="text-green-600 font-medium">${currency} ${formatNum(job.salary_min)}-${formatNum(job.salary_max)}${period}</span>`;
-        },
+          renderDescription(job) {
+            if (!job) return "";
 
-        formatSalaryText(job) {
-          if (!job || (!job.salary_min && !job.salary_max)) {
-            return 'Not specified';
-          }
-
-          const currency = job.salary_currency || '';
-          const period = job.salary_period || '';
-
-          const formatNum = (n) => {
-            if (n >= 1000) {
-              return (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + 'k';
+            if (job.description) {
+              return marked.parse(job.description);
             }
-            return n.toString();
-          };
 
-          let salaryStr = '';
-          if (job.salary_min === job.salary_max || !job.salary_max) {
-            salaryStr = `${currency} ${formatNum(job.salary_min)}`;
-          } else {
-            salaryStr = `${currency} ${formatNum(job.salary_min)} - ${formatNum(job.salary_max)}`;
-          }
-
-          if (period) {
-            salaryStr += ` (${period})`;
-          }
-
-          return salaryStr;
-        },
-
-        renderDescription(job) {
-          if (!job) return '';
-
-          if (job.description) {
-            return marked.parse(job.description);
-          }
-
-          return `
-            <div class="text-center py-10 text-gray-500">
-              <h3 class="text-lg font-semibold text-gray-800 mb-2">No Description Available</h3>
+            return `
+            <div class="text-center py-10 text-gray-500 dark:text-gray-400">
+              <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2">No Description Available</h3>
               <p>This job doesn't have a description yet. It may be from a non-crawlable platform like LinkedIn.</p>
             </div>
           `;
-        }
-      };
-    }
-  </script>
-</body>
+          },
+        };
+      }
+    </script>
+  </body>
 </html>
