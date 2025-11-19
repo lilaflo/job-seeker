@@ -372,6 +372,31 @@ Create a `skills.md` file in the project root with your skills and qualification
 
 **Note**: Skills matching against `skills.md` is coming in a future update. Currently, the app categorizes emails based on general job/project indicators.
 
+### 5. Install Git Hooks (Recommended)
+
+Install the pre-commit hook to automatically run tests before each commit:
+
+```bash
+./hooks/install.sh
+```
+
+This installs a pre-commit hook that:
+- ✅ Automatically runs all tests before every commit
+- ✅ Blocks commits if any tests fail
+- ✅ Ensures code quality and prevents broken commits
+- ✅ Shows test output in real-time
+
+**Manual installation** (if script fails):
+```bash
+cp hooks/pre-commit .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+**To bypass the hook** (use sparingly):
+```bash
+git commit --no-verify
+```
+
 ## Usage
 
 The Job Seeker uses a simple two-step workflow:
