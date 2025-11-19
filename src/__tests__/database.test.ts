@@ -16,6 +16,7 @@ import {
   getJobs,
   getJobStats,
   clearAllJobs,
+  deleteJob,
   addSkillToJob,
   addSkillsToJob,
   removeSkillFromJob,
@@ -28,6 +29,7 @@ import {
   getSkillByName,
   getPlatforms,
   getPlatformByDomain,
+  getPlatformIdFromEmail,
   canCrawlUrl,
   getSkipReason,
   updatePlatformCrawlability,
@@ -51,11 +53,13 @@ describe('database', () => {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         gmail_id TEXT NOT NULL UNIQUE,
         subject TEXT,
+        from_address TEXT,
         body TEXT,
         confidence TEXT NOT NULL CHECK(confidence IN ('high', 'medium', 'low')),
         is_job_related INTEGER NOT NULL CHECK(is_job_related IN (0, 1)),
         reason TEXT,
         processed INTEGER NOT NULL DEFAULT 0 CHECK(processed IN (0, 1)),
+        platform_id INTEGER REFERENCES platforms(id) ON DELETE SET NULL,
         created_at TEXT NOT NULL,
         scanned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
@@ -64,6 +68,8 @@ describe('database', () => {
       CREATE INDEX IF NOT EXISTS idx_is_job_related ON emails(is_job_related);
       CREATE INDEX IF NOT EXISTS idx_created_at ON emails(created_at);
       CREATE INDEX IF NOT EXISTS idx_emails_processed ON emails(processed);
+      CREATE INDEX IF NOT EXISTS idx_emails_platform_id ON emails(platform_id);
+      CREATE INDEX IF NOT EXISTS idx_emails_from_address ON emails(from_address);
 
       CREATE TABLE IF NOT EXISTS jobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -116,13 +122,23 @@ describe('database', () => {
       CREATE TABLE IF NOT EXISTS platforms (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         platform_name TEXT NOT NULL,
-        domain TEXT NOT NULL UNIQUE,
+        hostname TEXT NOT NULL UNIQUE,
         can_crawl INTEGER NOT NULL DEFAULT 1 CHECK(can_crawl IN (0, 1)),
         skip_reason TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-      CREATE INDEX IF NOT EXISTS idx_platforms_domain ON platforms(domain);
+      CREATE INDEX IF NOT EXISTS idx_platforms_hostname ON platforms(hostname);
       CREATE INDEX IF NOT EXISTS idx_platforms_can_crawl ON platforms(can_crawl);
+
+      CREATE TABLE IF NOT EXISTS job_embeddings (
+        job_id INTEGER PRIMARY KEY,
+        embedding BLOB NOT NULL,
+        embedding_dim INTEGER NOT NULL DEFAULT 768,
+        model TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_job_embeddings_model ON job_embeddings(model);
 
       -- Insert test skills
       INSERT INTO job_skills (name, category, proficiency_level) VALUES
@@ -135,12 +151,15 @@ describe('database', () => {
         ('PostgreSQL', 'Databases', 'Proficient'),
         ('MongoDB', 'Databases', 'Expert');
 
-      -- Insert test platforms
-      INSERT INTO platforms (platform_name, domain, can_crawl, skip_reason) VALUES
-        ('LinkedIn', 'linkedin.com', 0, 'Requires multi-level authentication (username, password, mobile app)'),
-        ('Indeed', 'indeed.com', 1, NULL),
-        ('Greenhouse', 'greenhouse.io', 1, NULL),
-        ('Test Platform', 'test-jobs.example.com', 1, NULL);
+      -- Insert test platforms (hostname without TLD for TLD-agnostic matching)
+      INSERT INTO platforms (platform_name, hostname, can_crawl, skip_reason) VALUES
+        ('LinkedIn', 'linkedin', 0, 'Requires multi-level authentication (username, password, mobile app)'),
+        ('Indeed', 'indeed', 1, NULL),
+        ('Greenhouse', 'greenhouse', 1, NULL),
+        ('Test Platform', 'example', 1, NULL),
+        ('FreelancerMap', 'freelancermap', 1, NULL),
+        ('Jobs.ch', 'jobs', 1, NULL),
+        ('Experteer', 'experteer', 1, NULL);
     `);
     db.close();
   });
@@ -790,6 +809,52 @@ describe('database', () => {
     });
   });
 
+  describe('deleteJob', () => {
+    it('should delete a job by ID and return true', () => {
+      saveJob('Job 1', 'https://example.com/job/1');
+      saveJob('Job 2', 'https://example.com/job/2');
+
+      const jobs = getJobs();
+      expect(jobs).toHaveLength(2);
+
+      // Find the job with job/1 to delete it
+      const jobToDelete = jobs.find(j => j.link === 'https://example.com/job/1');
+      expect(jobToDelete).toBeDefined();
+
+      const result = deleteJob(jobToDelete!.id);
+      expect(result).toBe(true);
+
+      const remainingJobs = getJobs();
+      expect(remainingJobs).toHaveLength(1);
+      expect(remainingJobs[0].link).toBe('https://example.com/job/2');
+    });
+
+    it('should return false when job ID does not exist', () => {
+      saveJob('Job 1', 'https://example.com/job/1');
+
+      const result = deleteJob(99999);
+      expect(result).toBe(false);
+
+      expect(getJobs()).toHaveLength(1);
+    });
+
+    it('should only delete the specified job', () => {
+      saveJob('Job 1', 'https://example.com/job/1');
+      saveJob('Job 2', 'https://example.com/job/2');
+      saveJob('Job 3', 'https://example.com/job/3');
+
+      const jobs = getJobs();
+      const jobToDelete = jobs.find(j => j.link === 'https://example.com/job/2');
+      expect(jobToDelete).toBeDefined();
+
+      deleteJob(jobToDelete!.id);
+
+      const remainingJobs = getJobs();
+      expect(remainingJobs).toHaveLength(2);
+      expect(remainingJobs.map(j => j.link)).not.toContain('https://example.com/job/2');
+    });
+  });
+
   // ============================================================================
   // Job-Skill Match Tests
   // ============================================================================
@@ -1040,10 +1105,10 @@ describe('database', () => {
     describe('getPlatforms', () => {
       it('should return all platforms', () => {
         const platforms = getPlatforms();
-        expect(platforms.length).toBeGreaterThanOrEqual(4); // At least 4 test platforms
+        expect(platforms.length).toBeGreaterThanOrEqual(7); // At least 7 test platforms
         expect(platforms[0]).toHaveProperty('id');
         expect(platforms[0]).toHaveProperty('platform_name');
-        expect(platforms[0]).toHaveProperty('domain');
+        expect(platforms[0]).toHaveProperty('hostname');
         expect(platforms[0]).toHaveProperty('can_crawl');
         expect(platforms[0]).toHaveProperty('skip_reason');
         expect(platforms[0]).toHaveProperty('created_at');
@@ -1061,21 +1126,21 @@ describe('database', () => {
       it('should find platform by exact domain match', () => {
         const platform = getPlatformByDomain('https://linkedin.com/jobs/123');
         expect(platform).not.toBeNull();
-        expect(platform?.domain).toBe('linkedin.com');
+        expect(platform?.hostname).toBe('linkedin');
         expect(platform?.platform_name).toBe('LinkedIn');
       });
 
       it('should find platform by subdomain match', () => {
         const platform = getPlatformByDomain('https://jobs.linkedin.com/view/12345');
         expect(platform).not.toBeNull();
-        expect(platform?.domain).toBe('linkedin.com');
+        expect(platform?.hostname).toBe('linkedin');
         expect(platform?.platform_name).toBe('LinkedIn');
       });
 
       it('should handle multiple subdomain levels', () => {
         const platform = getPlatformByDomain('https://app.greenhouse.io/jobs/123');
         expect(platform).not.toBeNull();
-        expect(platform?.domain).toBe('greenhouse.io');
+        expect(platform?.hostname).toBe('greenhouse');
         expect(platform?.platform_name).toBe('Greenhouse');
       });
 
@@ -1092,7 +1157,41 @@ describe('database', () => {
       it('should be case insensitive', () => {
         const platform = getPlatformByDomain('https://LINKEDIN.COM/jobs/123');
         expect(platform).not.toBeNull();
-        expect(platform?.domain).toBe('linkedin.com');
+        expect(platform?.hostname).toBe('linkedin');
+      });
+
+      it('should match different TLDs to same platform (TLD-agnostic)', () => {
+        // linkedin.de should match linkedin hostname
+        const platformDE = getPlatformByDomain('https://linkedin.de/jobs/123');
+        expect(platformDE).not.toBeNull();
+        expect(platformDE?.hostname).toBe('linkedin'); // Stored as hostname only
+
+        // linkedin.co.uk should also match
+        const platformUK = getPlatformByDomain('https://linkedin.co.uk/jobs/456');
+        expect(platformUK).not.toBeNull();
+        expect(platformUK?.hostname).toBe('linkedin');
+
+        // Both should be the same platform
+        expect(platformDE?.id).toBe(platformUK?.id);
+      });
+
+      it('should match freelancermap with different TLDs', () => {
+        const platformCom = getPlatformByDomain('https://freelancermap.com/job/123');
+        const platformDe = getPlatformByDomain('https://freelancermap.de/job/456');
+        const platformCh = getPlatformByDomain('https://freelancermap.ch/job/789');
+
+        expect(platformCom).not.toBeNull();
+        expect(platformDe).not.toBeNull();
+        expect(platformCh).not.toBeNull();
+
+        // All should have same hostname
+        expect(platformCom?.hostname).toBe('freelancermap');
+        expect(platformDe?.hostname).toBe('freelancermap');
+        expect(platformCh?.hostname).toBe('freelancermap');
+
+        // All should resolve to the same platform
+        expect(platformCom?.id).toBe(platformDe?.id);
+        expect(platformCom?.id).toBe(platformCh?.id);
       });
     });
 
@@ -1142,7 +1241,7 @@ describe('database', () => {
     describe('updatePlatformCrawlability', () => {
       it('should update can_crawl flag', () => {
         // Make Indeed non-crawlable
-        updatePlatformCrawlability('indeed.com', false, 'Testing purposes');
+        updatePlatformCrawlability('indeed', false, 'Testing purposes');
 
         let canCrawl = canCrawlUrl('https://indeed.com/job/123');
         expect(canCrawl).toBe(false);
@@ -1151,7 +1250,7 @@ describe('database', () => {
         expect(reason).toBe('Testing purposes');
 
         // Restore Indeed to crawlable
-        updatePlatformCrawlability('indeed.com', true, null);
+        updatePlatformCrawlability('indeed', true, undefined);
 
         canCrawl = canCrawlUrl('https://indeed.com/job/123');
         expect(canCrawl).toBe(true);
@@ -1161,11 +1260,11 @@ describe('database', () => {
       });
 
       it('should clear skip_reason when setting to crawlable', () => {
-        updatePlatformCrawlability('test-jobs.example.com', false, 'Test reason');
+        updatePlatformCrawlability('example', false, 'Test reason');
         let reason = getSkipReason('https://test-jobs.example.com/job/1');
         expect(reason).toBe('Test reason');
 
-        updatePlatformCrawlability('test-jobs.example.com', true);
+        updatePlatformCrawlability('example', true);
         reason = getSkipReason('https://test-jobs.example.com/job/1');
         expect(reason).toBeNull();
       });
@@ -1177,9 +1276,113 @@ describe('database', () => {
         expect(stats).toHaveProperty('total');
         expect(stats).toHaveProperty('crawlable');
         expect(stats).toHaveProperty('nonCrawlable');
-        expect(stats.total).toBeGreaterThanOrEqual(4);
+        expect(stats.total).toBeGreaterThanOrEqual(7);
         expect(stats.nonCrawlable).toBeGreaterThanOrEqual(1); // At least LinkedIn
         expect(stats.crawlable).toBe(stats.total - stats.nonCrawlable);
+      });
+    });
+
+    describe('getPlatformIdFromEmail', () => {
+      it('should extract platform ID from email address', () => {
+        const platformId = getPlatformIdFromEmail('jobs-noreply@linkedin.com');
+        expect(platformId).not.toBeNull();
+
+        // Verify it's actually LinkedIn's ID
+        const platforms = getPlatforms();
+        const linkedin = platforms.find(p => p.hostname === 'linkedin');
+        expect(platformId).toBe(linkedin?.id);
+      });
+
+      it('should handle email addresses with display names', () => {
+        const platformId = getPlatformIdFromEmail('LinkedIn Jobs <jobs@linkedin.com>');
+        expect(platformId).not.toBeNull();
+      });
+
+      it('should match subdomain emails', () => {
+        const platformId = getPlatformIdFromEmail('notifications@jobs.indeed.com');
+        expect(platformId).not.toBeNull();
+
+        const platforms = getPlatforms();
+        const indeed = platforms.find(p => p.hostname === 'indeed');
+        expect(platformId).toBe(indeed?.id);
+      });
+
+      it('should return null for unknown platforms', () => {
+        const platformId = getPlatformIdFromEmail('hr@unknown-company.com');
+        expect(platformId).toBeNull();
+      });
+
+      it('should return null for invalid email addresses', () => {
+        const platformId = getPlatformIdFromEmail('not-an-email');
+        expect(platformId).toBeNull();
+      });
+
+      it('should be case insensitive', () => {
+        const platformId = getPlatformIdFromEmail('JOBS@LINKEDIN.COM');
+        expect(platformId).not.toBeNull();
+      });
+
+      it('should extract platform ID from jobs.ch email address', () => {
+        const platformId = getPlatformIdFromEmail('noreply@jobs.ch');
+        expect(platformId).not.toBeNull();
+
+        const platforms = getPlatforms();
+        const jobsCh = platforms.find(p => p.hostname === 'jobs');
+        expect(platformId).toBe(jobsCh?.id);
+      });
+
+      it('should handle jobs.ch subdomain emails', () => {
+        const platformId = getPlatformIdFromEmail('noreply@mail.jobs.ch');
+        expect(platformId).not.toBeNull();
+
+        const platforms = getPlatforms();
+        const jobsCh = platforms.find(p => p.hostname === 'jobs');
+        expect(platformId).toBe(jobsCh?.id);
+      });
+
+      it('should handle forwarded email addresses (jobs.ch via lale.li)', () => {
+        const platformId = getPlatformIdFromEmail('chjobs+candidate=jobs.ch@lale.li');
+        expect(platformId).not.toBeNull();
+
+        const platforms = getPlatforms();
+        const jobsCh = platforms.find(p => p.hostname === 'jobs');
+        expect(platformId).toBe(jobsCh?.id);
+      });
+
+      it('should handle forwarded email with display name', () => {
+        const platformId = getPlatformIdFromEmail('"Service jobs.ch - info(a)jobs.ch" <chjobs+candidate=jobs.ch@lale.li>');
+        expect(platformId).not.toBeNull();
+
+        const platforms = getPlatforms();
+        const jobsCh = platforms.find(p => p.hostname === 'jobs');
+        expect(platformId).toBe(jobsCh?.id);
+      });
+
+      it('should handle forwarded freelancermap email', () => {
+        const platformId = getPlatformIdFromEmail('flmch+office=freelancermap.de@lale.li');
+        expect(platformId).not.toBeNull();
+
+        const platforms = getPlatforms();
+        const freelancermap = platforms.find(p => p.hostname === 'freelancermap');
+        expect(platformId).toBe(freelancermap?.id);
+      });
+
+      it('should handle forwarded indeed email', () => {
+        const platformId = getPlatformIdFromEmail('indeed+do-not-reply=indeed.com@lale.li');
+        expect(platformId).not.toBeNull();
+
+        const platforms = getPlatforms();
+        const indeed = platforms.find(p => p.hostname === 'indeed');
+        expect(platformId).toBe(indeed?.id);
+      });
+
+      it('should handle forwarded experteer email', () => {
+        const platformId = getPlatformIdFromEmail('experteer+news=email.experteer.com@lale.li');
+        expect(platformId).not.toBeNull();
+
+        const platforms = getPlatforms();
+        const experteer = platforms.find(p => p.hostname === 'experteer');
+        expect(platformId).toBe(experteer?.id);
       });
     });
   });

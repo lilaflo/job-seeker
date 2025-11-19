@@ -11,6 +11,9 @@
     "process:jobs": "tsx src/process-jobs.ts",
     "scan:all": "tsx src/index.ts && tsx src/extract-jobs.ts",
     "scan:full": "tsx src/index.ts && tsx src/extract-jobs.ts",
+    "populate:from": "tsx src/populate-from-addresses.ts",
+    "update:platforms": "tsx src/update-platform-ids.ts",
+    "serve": "dotenvx run -- tsx src/server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui"
@@ -24,6 +27,7 @@
     "@types/cheerio": "^1.0.0",
     "@types/cli-progress": "^3.11.6",
     "@types/node": "^24.10.1",
+    "@types/ws": "^8.18.1",
     "@vitest/ui": "^4.0.9",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
@@ -37,6 +41,8 @@
     "dotenv": "^17.2.3",
     "google-auth-library": "^10.5.0",
     "googleapis": "^166.0.0",
-    "ollama": "^0.6.3"
+    "ollama": "^0.6.3",
+    "sqlite-vec": "0.1.7-alpha.2",
+    "ws": "^8.18.3"
   }
 }

@@ -7,11 +7,13 @@ export interface StoredEmail {
   id: number;
   gmail_id: string;
   subject: string | null;
+  from_address: string | null;
   body: string | null;
   confidence: 'high' | 'medium' | 'low';
   is_job_related: 0 | 1;
   reason: string | null;
   processed: 0 | 1;
+  platform_id: number | null;
   created_at: string;
   scanned_at: string;
 }
@@ -28,6 +30,7 @@ export interface StoredJob {
   description: string | null;
   created_at: string;
   scanned_at: string;
+  email_date: string | null;
 }
 
 export interface StoredSkill {
@@ -49,7 +52,7 @@ export interface JobSkillMatch {
 export interface Platform {
   id: number;
   platform_name: string;
-  domain: string;
+  hostname: string;
   can_crawl: 0 | 1;
   skip_reason: string | null;
   created_at: string;
@@ -60,7 +63,7 @@ let db: Database.Database | null = null;
 /**
  * Gets or creates the database connection
  */
-function getDatabase(): Database.Database {
+export function getDatabase(): Database.Database {
   if (!db) {
     // Allow test environment to override database path
     const dbName = process.env.NODE_ENV === 'test' ? 'job-seeker.test.db' : 'job-seeker.db';
@@ -99,7 +102,8 @@ export function isEmailScanned(gmailId: string): boolean {
 export function saveEmail(
   email: EmailMessage,
   category: EmailCategory,
-  body?: string
+  body?: string,
+  platformId?: number | null
 ): void {
   const database = getDatabase();
 
@@ -107,26 +111,36 @@ export function saveEmail(
   const shouldSaveBody = category.confidence === 'high';
   const bodyToSave = shouldSaveBody ? (body || null) : null;
 
+  // If platformId not provided, try to extract it from email sender
+  let finalPlatformId = platformId;
+  if (finalPlatformId === undefined && email.from) {
+    finalPlatformId = getPlatformIdFromEmail(email.from);
+  }
+
   const stmt = database.prepare(`
-    INSERT INTO emails (gmail_id, subject, body, confidence, is_job_related, reason, created_at, processed)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+    INSERT INTO emails (gmail_id, subject, from_address, body, confidence, is_job_related, reason, created_at, processed, platform_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
     ON CONFLICT(gmail_id) DO UPDATE SET
       subject = excluded.subject,
+      from_address = excluded.from_address,
       body = excluded.body,
       confidence = excluded.confidence,
       is_job_related = excluded.is_job_related,
       reason = excluded.reason,
+      platform_id = excluded.platform_id,
       scanned_at = CURRENT_TIMESTAMP
   `);
 
   stmt.run(
     email.id,
     email.subject || null,
+    email.from || null,
     bodyToSave,
     category.confidence,
     category.isJobRelated ? 1 : 0,
     category.reason || null,
-    email.internalDate || new Date().toISOString()
+    email.internalDate || new Date().toISOString(),
+    finalPlatformId || null
   );
 }
 
@@ -341,15 +355,24 @@ export function getJobs(filter?: {
 }): StoredJob[] {
   const database = getDatabase();
 
-  let query = 'SELECT * FROM jobs WHERE 1=1';
+  let query = `
+    SELECT
+      j.id, j.title, j.link, j.email_id,
+      j.salary_min, j.salary_max, j.salary_currency, j.salary_period,
+      j.description, j.created_at, j.scanned_at,
+      e.created_at as email_date
+    FROM jobs j
+    LEFT JOIN emails e ON j.email_id = e.id
+    WHERE 1=1
+  `;
   const params: any[] = [];
 
   if (filter?.emailId !== undefined) {
-    query += ' AND email_id = ?';
+    query += ' AND j.email_id = ?';
     params.push(filter.emailId);
   }
 
-  query += ' ORDER BY created_at DESC';
+  query += ' ORDER BY COALESCE(e.created_at, j.created_at) DESC';
 
   if (filter?.limit) {
     query += ' LIMIT ?';
@@ -381,6 +404,15 @@ export function getJobStats(): {
 export function clearAllJobs(): void {
   const database = getDatabase();
   database.prepare('DELETE FROM jobs').run();
+}
+
+/**
+ * Deletes a job by ID
+ */
+export function deleteJob(id: number): boolean {
+  const database = getDatabase();
+  const result = database.prepare('DELETE FROM jobs WHERE id = ?').run(id);
+  return result.changes > 0;
 }
 
 // ============================================================================
@@ -731,34 +763,144 @@ export function getPlatforms(): Platform[] {
 }
 
 /**
- * Extracts domain from URL
+ * Extracts hostname from URL (without TLD)
+ * Examples:
+ *   https://linkedin.com/jobs → linkedin
+ *   https://freelancermap.de/project → freelancermap
+ *   https://jobs.linkedin.com/view → linkedin
+ *   https://app.greenhouse.io/jobs → greenhouse
+ *   https://linkedin.co.uk/jobs → linkedin
  */
-function extractDomainFromUrl(url: string): string {
+function extractHostnameFromUrl(url: string): string {
   try {
     const urlObj = new URL(url);
-    return urlObj.hostname.toLowerCase();
+    let domain = urlObj.hostname.toLowerCase();
+
+    // Remove www prefix if present
+    domain = domain.replace(/^www\./, '');
+
+    // Split by dots
+    const parts = domain.split('.');
+
+    // If only one part, return it
+    if (parts.length === 1) return parts[0];
+
+    // For 2 parts (domain.tld): return first part
+    if (parts.length === 2) {
+      return parts[0];
+    }
+
+    // For 3+ parts, check if it's a country code TLD (ccTLD)
+    // Common pattern: domain.co.uk, domain.com.au, etc.
+    // If second-to-last is 2-3 chars and looks like a ccTLD part, take third-to-last
+    const lastPart = parts[parts.length - 1];
+    const secondToLast = parts[parts.length - 2];
+
+    // Check if this looks like a ccTLD pattern (e.g., co.uk, com.au, ne.jp)
+    if (secondToLast.length <= 3 && lastPart.length <= 3 && parts.length >= 3) {
+      // Likely a ccTLD, return third-to-last part
+      return parts[parts.length - 3];
+    }
+
+    // For regular subdomains (jobs.linkedin.com), return second-to-last part
+    return parts[parts.length - 2];
   } catch {
     return '';
   }
 }
 
 /**
- * Gets platform by matching URL domain
- * Supports exact matches and subdomain matching (e.g., jobs.linkedin.com matches linkedin.com)
+ * Extracts hostname from domain string (without TLD)
+ * Examples:
+ *   linkedin.com → linkedin
+ *   freelancermap.de → freelancermap
+ *   jobs.linkedin.com → linkedin
+ *   linkedin.co.uk → linkedin
+ */
+function extractHostnameFromDomain(domain: string): string {
+  if (!domain) return '';
+
+  // Remove www prefix if present
+  domain = domain.replace(/^www\./, '');
+
+  // Split by dots
+  const parts = domain.split('.');
+
+  // If only one part, return it
+  if (parts.length === 1) return parts[0];
+
+  // For 2 parts (domain.tld): return first part
+  if (parts.length === 2) {
+    return parts[0];
+  }
+
+  // For 3+ parts, check if it's a country code TLD (ccTLD)
+  const lastPart = parts[parts.length - 1];
+  const secondToLast = parts[parts.length - 2];
+
+  // Check if this looks like a ccTLD pattern (e.g., co.uk, com.au, ne.jp)
+  if (secondToLast.length <= 3 && lastPart.length <= 3 && parts.length >= 3) {
+    // Likely a ccTLD, return third-to-last part
+    return parts[parts.length - 3];
+  }
+
+  // For regular subdomains (jobs.linkedin.com), return second-to-last part
+  return parts[parts.length - 2];
+}
+
+/**
+ * Gets platform by matching URL hostname (TLD-agnostic)
+ * Matches base hostname without TLD, so linkedin.com, linkedin.de, linkedin.co.uk all match "linkedin"
+ * Also supports subdomain matching (e.g., jobs.linkedin.com matches linkedin)
  */
 export function getPlatformByDomain(url: string): Platform | null {
-  const domain = extractDomainFromUrl(url);
-  if (!domain) return null;
+  const hostname = extractHostnameFromUrl(url);
+  if (!hostname) return null;
 
   const database = getDatabase();
-  const platforms = database.prepare('SELECT * FROM platforms').all() as Platform[];
-
-  // Check for exact match or subdomain match
-  const platform = platforms.find(p =>
-    domain === p.domain || domain.endsWith('.' + p.domain)
-  );
+  const stmt = database.prepare('SELECT * FROM platforms WHERE hostname = ? LIMIT 1');
+  const platform = stmt.get(hostname) as Platform | undefined;
 
   return platform || null;
+}
+
+/**
+ * Gets platform ID from email address (TLD-agnostic)
+ * Uses hostname matching to find the platform
+ * Handles email forwarding services (e.g., alias+original=domain.com@forwarder.li)
+ */
+export function getPlatformIdFromEmail(emailAddress: string): number | null {
+  if (!emailAddress) return null;
+
+  // Extract the full email part (everything between < and > or the whole string)
+  const emailMatch = emailAddress.match(/<([^>]+)>|([^\s<>]+@[^\s<>]+)/);
+  if (!emailMatch) return null;
+
+  const fullEmail = (emailMatch[1] || emailMatch[2]).toLowerCase().trim();
+
+  // Check if this is a forwarded email pattern: alias+something=originaldomain@forwarder.domain
+  // Example: chjobs+candidate=jobs.ch@lale.li
+  const forwardedMatch = fullEmail.match(/[^@]+\+[^=]+=([^@]+)@/);
+
+  let domain: string;
+  if (forwardedMatch) {
+    // Extract the original domain from the forwarding pattern
+    domain = forwardedMatch[1];
+  } else {
+    // Standard email - extract domain after @
+    const standardMatch = fullEmail.match(/@([^>]+)/);
+    if (!standardMatch) return null;
+    domain = standardMatch[1].replace(/[>\)\]]+$/, '');
+  }
+
+  const hostname = extractHostnameFromDomain(domain);
+  if (!hostname) return null;
+
+  const database = getDatabase();
+  const stmt = database.prepare('SELECT id FROM platforms WHERE hostname = ? LIMIT 1');
+  const result = stmt.get(hostname) as { id: number } | undefined;
+
+  return result ? result.id : null;
 }
 
 /**
@@ -793,7 +935,7 @@ export function getSkipReason(url: string): string | null {
  * Updates crawlability setting for a platform
  */
 export function updatePlatformCrawlability(
-  domain: string,
+  hostname: string,
   canCrawl: boolean,
   skipReason?: string
 ): void {
@@ -801,9 +943,9 @@ export function updatePlatformCrawlability(
   const stmt = database.prepare(`
     UPDATE platforms
     SET can_crawl = ?, skip_reason = ?
-    WHERE domain = ?
+    WHERE hostname = ?
   `);
-  stmt.run(canCrawl ? 1 : 0, skipReason || null, domain);
+  stmt.run(canCrawl ? 1 : 0, skipReason || null, hostname);
 }
 
 /**

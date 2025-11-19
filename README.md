@@ -26,7 +26,24 @@ An automation tool that scans Gmail for job-related emails, extracts job descrip
 - ✅ **Skills Database** - Pre-populated with 70 skills from resume across 11 categories (Programming, Cloud, AI, etc.)
 - ✅ **Job-Skill Matching** - Junction table to classify jobs by required skills with relevance scoring
 - ✅ **Match Scoring** - Calculate job compatibility based on skill requirements
-- ✅ **Structured Salary Data** - Track min/max salary ranges with currency and period (yearly/hourly/etc.) for precise filtering
+- ✅ **AI-Powered Salary Extraction** - Uses Ollama LLM to intelligently extract salary information from job pages:
+  - **Primary method**: Ollama analyzes job page text with context-aware extraction
+  - **Fallback method**: Regex patterns for when Ollama is unavailable
+  - **Validation**: Rejects unrealistic values (yearly: 20k-1M, monthly: 1.5k-100k, hourly: 10-500)
+  - Salary ranges: "$80,000 - $120,000", "€60k-€80k", "CHF 100'000 - CHF 120'000"
+  - Single values: "$100,000", "€75k", "£50,000/year"
+  - Multiple currencies: USD, EUR, GBP, CHF with automatic normalization
+  - Multiple formats: US (80,000.50), European (80.000,50), Swiss (80'000)
+  - Period detection: yearly, monthly, weekly, daily, hourly
+  - Smart k-suffix handling: "50-60k" interpreted as "50k-60k"
+  - Better accuracy with complex or unusual salary formats
+- ✅ **Structured Salary Data** - Track min/max salary ranges with currency and period for precise filtering
+- ✅ **Email-Based Job Descriptions** - For non-crawlable platforms (LinkedIn, etc.), uses Ollama to generate structured job descriptions from email content:
+  - **Automatic fallback**: When job page cannot be crawled, analyzes the email notification instead
+  - **Structured format**: Extracts Role Overview, Key Responsibilities, Requirements, Nice to Have, Work Details
+  - **Professional summaries**: AI-generated descriptions under 500 words
+  - **Complete tracking**: All jobs saved with metadata, descriptions added where possible
+  - **Separate statistics**: Shows count of web-scraped vs email-generated descriptions
 - ✅ **Migration System** - Trackable database migrations with automatic version control
 - ✅ **Web Scraping** - Fetches job pages with intelligent content extraction using cheerio
 - ✅ **AI Job Summarization** - Uses Ollama to generate structured job description summaries (Role Overview, Responsibilities, Requirements, etc.)
@@ -34,13 +51,26 @@ An automation tool that scans Gmail for job-related emails, extracts job descrip
 - ✅ **Platform Crawl Control** - Database-driven platform management with configurable crawlability flags and skip reasons
 - ✅ **Smart Filtering** - Automatically skips non-crawlable platforms (e.g., LinkedIn requires multi-level authentication)
 - ✅ **Smart Processing** - Skips jobs that already have descriptions, with rate limiting for respectful scraping
-- ✅ **Comprehensive Unit Tests** - Full test coverage with 156 passing tests using Vitest
+- ✅ **Platform Tracking in Emails** - Each email linked to its source platform (LinkedIn, Indeed, etc.) via foreign key
+- ✅ **Vector Search (RAG)** - Semantic job search using vector embeddings:
+  - **Ollama embeddings**: Uses nomic-embed-text model (768 dimensions) for semantic understanding
+  - **SQLite storage**: Embeddings stored as binary BLOBs for efficient retrieval
+  - **Cosine similarity**: Rank jobs by semantic relevance to search queries
+  - **Smart search toggle**: UI switch between keyword and semantic search
+  - **Embedding generation**: One-click generation for all jobs without embeddings
+  - **API endpoints**: `/api/jobs/search` for semantic search, `/api/embeddings/generate` for batch generation
+- ✅ **Real-time WebSocket Updates** - Live progress during email scanning:
+  - **WebSocket server**: Streams scan progress to all connected clients
+  - **Live email display**: Shows each processed email immediately with checkmark/X indicator
+  - **Progress bar**: Visual progress indicator during categorization
+  - **Confidence badges**: Color-coded confidence levels (high/medium/low)
+  - **Auto-reconnect**: Reconnects automatically if connection drops
+- ✅ **Comprehensive Unit Tests** - Full test coverage with 262 passing tests using Vitest
 
 ### Coming Soon
 
 - 🔜 **Skills Matching** - Match job requirements against your skills.md profile
 - 🔜 **Gmail Marking** - Automatically mark matching jobs as important/starred
-- 🔜 **Salary Extraction** - Automatically extract salary information from job descriptions
 
 ## Prerequisites
 
@@ -115,10 +145,12 @@ The migration system:
 This creates `job-seeker.db` with the following structure:
 
 **emails table**: Stores scanned emails
-- gmail_id (unique), subject, body, confidence, is_job_related, reason, processed, timestamps
+- gmail_id (unique), subject, from_address, body, confidence, is_job_related, reason, processed, platform_id (FK), timestamps
 - Smart storage: High-confidence emails store full body text, low/medium confidence stores only metadata
 - processed: INTEGER (0/1) - Tracks whether email has been fully processed to prevent reprocessing
-- Indexes: Optimized for fast lookups by gmail_id, confidence, job-related status, processed status, and date
+- from_address: TEXT - Sender email address for platform detection and filtering
+- platform_id: INTEGER - Foreign key to platforms table, automatically detected from sender
+- Indexes: Optimized for fast lookups by gmail_id, confidence, job-related status, processed status, from_address, platform_id, and date
 
 **jobs table**: Tracks job postings to prevent duplicate scans
 - id, title, link (unique), email_id (foreign key), salary_min, salary_max, salary_currency, salary_period, description, created_at, scanned_at
@@ -156,6 +188,23 @@ This creates `job-seeker.db` with the following structure:
 - CASCADE deletion: removes matches when job or skill is deleted
 - Indexes: Optimized for finding skills by job, jobs by skill, and sorting by relevance
 
+**platforms table**: Manages job platforms and crawlability
+- id, platform_name, hostname (unique), can_crawl, skip_reason, created_at
+- 70+ pre-configured platforms (LinkedIn, Indeed, Greenhouse, etc.)
+- hostname: TLD-agnostic matching (e.g., 'linkedin' matches linkedin.com, linkedin.de, linkedin.co.uk)
+- can_crawl: INTEGER (0/1) - Controls which platforms can have descriptions fetched
+- skip_reason: TEXT - Explanation for why platform cannot be crawled
+- Linked to emails via platform_id foreign key for automatic sender tracking
+- Indexes: Optimized for hostname and crawlability lookups
+
+**job_embeddings table**: Stores vector embeddings for semantic search
+- job_id (FK, primary key), embedding (BLOB), embedding_dim, model, created_at
+- Foreign key to jobs table with CASCADE delete
+- embedding: Binary BLOB storing float32 array for vector search
+- embedding_dim: Dimension of embedding vector (768 for nomic-embed-text)
+- model: Name of embedding model used (nomic-embed-text)
+- Index on model for filtering by embedding source
+
 **migrations table**: Tracks applied database migrations
 - id, filename (unique), applied_at
 - Automatically managed by `migrate.sh`
@@ -177,6 +226,23 @@ SELECT COUNT(*) FROM emails WHERE is_job_related=1;
 
 # View recent emails
 SELECT gmail_id, subject, confidence FROM emails ORDER BY created_at DESC LIMIT 10;
+
+# View emails with sender information
+SELECT gmail_id, subject, from_address, confidence FROM emails
+WHERE from_address IS NOT NULL ORDER BY created_at DESC LIMIT 10;
+
+# Find emails from a specific platform
+SELECT e.gmail_id, e.subject, e.from_address, p.platform_name
+FROM emails e
+JOIN platforms p ON e.platform_id = p.id
+WHERE p.platform_name = 'LinkedIn';
+
+# Count emails by platform
+SELECT p.platform_name, COUNT(*) as email_count
+FROM emails e
+LEFT JOIN platforms p ON e.platform_id = p.id
+GROUP BY p.platform_name
+ORDER BY email_count DESC;
 
 # View all tracked jobs with salary info
 SELECT title, link, salary_min, salary_max, salary_currency, salary_period
@@ -247,6 +313,20 @@ ORDER BY jsm.relevance_score DESC;
 
 # View applied migrations
 SELECT * FROM migrations ORDER BY applied_at;
+
+# View embedding statistics
+SELECT COUNT(*) as total_embeddings FROM job_embeddings;
+
+# View jobs with embeddings
+SELECT j.title, je.model, je.embedding_dim
+FROM jobs j
+JOIN job_embeddings je ON j.id = je.job_id
+LIMIT 10;
+
+# Find jobs without embeddings
+SELECT j.id, j.title FROM jobs j
+LEFT JOIN job_embeddings je ON j.id = je.job_id
+WHERE je.job_id IS NULL;
 ```
 
 ### 5. Create Your Skills Profile (Optional)
@@ -277,6 +357,33 @@ Create a `skills.md` file in the project root with your skills and qualification
 ## Usage
 
 The Job Seeker uses a simple two-step workflow:
+
+### View Jobs in Web Interface
+
+Start the web server to view your job listings in a browser:
+
+```bash
+dotenvx run -- pnpm serve
+```
+
+Then open http://localhost:3001 in your browser.
+
+**Features:**
+- **Job table** with sortable columns (title, link, salary, description, date)
+- **Search/filter** jobs by title, URL, or description
+- **Salary display** with formatted ranges (e.g., "USD 80k-120k/y")
+- **Description preview** with full text on hover
+- **Statistics** showing total jobs, with salary, with descriptions
+- **Responsive design** for desktop and mobile
+
+**API Endpoints:**
+- `GET /api/jobs?limit=100` - Fetch job listings with optional limit
+- `GET /api/platforms` - Fetch platform information
+- `POST /api/scan` - Trigger email scan
+- `GET /api/scan/status` - Check scan status
+- `POST /api/jobs/search` - Semantic search (body: `{query, limit, minSimilarity}`)
+- `POST /api/embeddings/generate` - Generate embeddings for all jobs
+- `POST /api/reset` - Reset database (delete and run migrations)
 
 ### Step 1: Scan and Categorize Emails
 
@@ -379,6 +486,28 @@ dotenvx run -- pnpm start
 dotenvx run -- pnpm dev
 ```
 
+### Utility Scripts
+
+For database maintenance and backfilling data:
+
+```bash
+# Populate from_address for existing emails (one-time)
+dotenvx run -- pnpm populate:from
+
+# Update platform_id for existing emails (one-time)
+dotenvx run -- pnpm update:platforms
+```
+
+**populate:from** - Backfills sender email addresses for existing emails in database
+- Fetches email metadata from Gmail API
+- Updates from_address column for all emails where it's NULL
+- Useful after adding the from_address column via migration
+
+**update:platforms** - Links existing emails to their source platforms
+- Uses from_address to detect platform (LinkedIn, Indeed, etc.)
+- Updates platform_id foreign key for all emails where it's NULL
+- Automatically matches TLD-agnostic hostnames (linkedin.com, linkedin.de → linkedin)
+
 ### Running Tests
 
 ```bash
@@ -422,14 +551,34 @@ pnpm build
 11. **Job Title Parsing**: Intelligently extracts job titles from:
     - Email subject lines (with prefix/suffix cleaning)
     - Email body content (as fallback)
-12. **Optional Description Fetching** (if `FETCH_DESCRIPTIONS=true`):
-    - Visits each new job URL
-    - Scrapes page content using cheerio with platform-specific selectors
-    - Summarizes description using Ollama AI (temperature 0.3, 1000 tokens)
-    - Handles failures gracefully (saves job without description if scraping fails)
-    - Adds 1-second delay between requests
-13. **Job Persistence**: Saves jobs to jobs table with duplicate detection
-14. **Progress Tracking**: Shows extraction progress and summary statistics (including description fetch stats if enabled)
+12. **Platform Crawlability Check**: Determines whether each job URL can be crawled:
+    - Checks platforms database for crawlability flags
+    - Non-crawlable platforms (e.g., LinkedIn) marked for special handling
+13. **Optional Description Fetching** (if `FETCH_DESCRIPTIONS=true`):
+    - **For crawlable platforms**:
+      - Visits each new job URL
+      - Scrapes page content using cheerio with platform-specific selectors
+      - **Extracts salary information using Ollama AI**:
+        - Primary method: Ollama LLM analyzes job page text for salary information
+        - Validation: Rejects unrealistic values (yearly: 20k-1M, monthly: 1.5k-100k, hourly: 10-500)
+        - Understands context and complex salary formats
+        - Extracts ranges: "$80,000 - $120,000", "€60k-€80k per year"
+        - Extracts single values: "$100,000", "CHF 100'000"
+        - Handles multiple formats: US (commas), European (dots/comma), Swiss (apostrophes)
+        - Automatic currency detection (USD, EUR, GBP, CHF)
+        - Period detection (yearly, monthly, weekly, daily, hourly)
+        - Smart k-suffix handling: "50-60k" treated as "50k-60k"
+        - Fallback to regex patterns if Ollama fails
+      - Summarizes description using Ollama AI (temperature 0.3, 1000 tokens)
+      - Adds 1-second delay between requests
+    - **For non-crawlable platforms (LinkedIn, etc.)**:
+      - Uses Ollama to generate structured job description from email notification
+      - Extracts available information: Role Overview, Responsibilities, Requirements, Nice to Have, Work Details
+      - Shorter delay (500ms) as no web request needed
+      - Saves job with AI-generated description from email content
+    - Handles failures gracefully (saves job with or without description)
+14. **Job Persistence**: Saves jobs to jobs table with duplicate detection and salary data
+15. **Progress Tracking**: Shows extraction progress and summary statistics (including separate counts for web-scraped vs email-generated descriptions)
 
 ### Step 3: Job Description Processing (`pnpm process:jobs`)
 
@@ -518,15 +667,23 @@ job-seeker/
 │   ├── 005_add_salary_estimation_to_jobs.sql # Initial salary column (deprecated)
 │   ├── 006_split_salary_to_min_max.sql      # Structured salary fields (min/max/currency/period)
 │   ├── 007_add_description_to_jobs.sql      # Job description field for AI summaries
-│   └── 008_add_processed_to_emails.sql      # Processed flag to prevent email reprocessing
+│   ├── 008_add_processed_to_emails.sql      # Processed flag to prevent email reprocessing
+│   ├── 009_create_platforms_table.sql       # Platform crawlability management
+│   ├── 010_add_from_to_emails.sql           # Sender tracking for emails
+│   └── 011_create_job_embeddings_table.sql  # Vector embeddings for semantic search
+├── public/
+│   └── index.html                 # Single-page job listing web interface
 ├── src/
-│   ├── __tests__/                  # Unit tests (138 tests passing)
+│   ├── __tests__/                  # Unit tests (262 tests passing)
 │   │   ├── gmail-auth.test.ts      # 8 tests for OAuth authentication
 │   │   ├── email-scanner.test.ts   # 14 tests for email fetching
 │   │   ├── email-categorizer.test.ts # 13 tests for AI categorization
 │   │   ├── job-portal-domains.test.ts # 15 tests for domain whitelisting
 │   │   ├── url-extractor.test.ts   # 28 tests for URL extraction
-│   │   └── database.test.ts        # 60 tests for database operations (emails, jobs, skills, salary, descriptions, processed)
+│   │   ├── job-scraper.test.ts     # 43 tests for salary extraction (ranges, single values, formats, currencies, periods)
+│   │   ├── database.test.ts        # 96 tests for database operations (emails, jobs, skills, salary, descriptions, processed)
+│   │   ├── server.test.ts          # 27 tests for web server API endpoints
+│   │   └── embeddings.test.ts      # 18 tests for vector embeddings and semantic search
 │   ├── email-categorizer.ts        # AI-powered categorization with Ollama
 │   ├── email-scanner.ts            # Email fetching with progress bars
 │   ├── gmail-auth.ts               # Gmail OAuth authentication
@@ -534,9 +691,11 @@ job-seeker/
 │   ├── url-extractor.ts            # Job URL extraction and title parsing
 │   ├── job-scraper.ts              # Web scraping module for job pages (cheerio)
 │   ├── database.ts                 # SQLite database operations (emails, jobs, skills, matching, descriptions)
+│   ├── embeddings.ts               # Vector embeddings module for semantic search (Ollama + cosine similarity)
 │   ├── index.ts                    # Main entry point (Step 1: Email scanning)
 │   ├── extract-jobs.ts             # Job extraction script (Step 2: Job URL extraction)
-│   └── process-jobs.ts             # Job processing script (Step 3: Scrape & summarize descriptions)
+│   ├── process-jobs.ts             # Job processing script (Step 3: Scrape & summarize descriptions)
+│   └── server.ts                   # Web server for job listing interface (API + static files)
 ├── migrate.sh                      # Database migration script (executable)
 ├── job-seeker.db                   # SQLite database (git-ignored, auto-created)
 ├── credentials.json                # Google OAuth credentials (git-ignored)
@@ -604,11 +763,11 @@ By default, these platforms are marked as non-crawlable:
 
 When jobs from non-crawlable platforms are encountered, they are:
 - **Saved to the database** - Job title and URL are tracked for completeness
-- **Without descriptions** - Description fetching is skipped (can't crawl the page)
-- **Tracked in statistics** - Shows count and skip reasons in extraction summary
-- **Logged for visibility** - Console output shows which platforms were saved without descriptions
+- **AI-Generated descriptions from email** - Uses Ollama to create structured job descriptions from the email notification content (if FETCH_DESCRIPTIONS is enabled)
+- **Tracked separately in statistics** - Shows count of email-generated vs web-scraped descriptions
+- **Logged for visibility** - Console output shows which platforms had descriptions generated from email
 
-This approach ensures you have a complete record of ALL job opportunities (including LinkedIn), but only fetches descriptions for platforms that can actually be crawled.
+This approach ensures you have a complete record of ALL job opportunities (including LinkedIn) with descriptions. For crawlable platforms, descriptions come from web scraping; for non-crawlable platforms, descriptions are generated from the email notification using AI.
 
 ### Viewing Platform Status
 
@@ -775,6 +934,14 @@ pnpm build
 - **job-scraper.ts** - Web scraping module for job pages:
   - Fetches HTML with proper browser headers
   - Extracts job descriptions using cheerio with 15+ platform-specific selectors
+  - **AI-powered salary extraction** using Ollama LLM:
+    - Primary: Ollama analyzes job page text with context awareness
+    - Fallback: Regex patterns for when Ollama is unavailable
+    - Handles multiple formats: US ($80,000), European (€80.000,50), Swiss (CHF 80'000)
+    - Supports ranges and single values with k-suffix ("50-60k" → 50k-60k)
+    - Detects currencies (USD, EUR, GBP, CHF) and periods (yearly, monthly, hourly, etc.)
+    - Returns structured data (min, max, currency, period)
+    - Better accuracy with complex or unusual salary formats
   - Cleans and normalizes extracted text
   - Removes noise elements (scripts, styles, navigation, footers)
   - Fallback extraction strategies for unknown platforms
@@ -786,6 +953,13 @@ pnpm build
   - Match percentage calculation for job compatibility
   - Query functions for finding matching jobs by skill requirements
   - COALESCE updates to preserve existing data
+- **embeddings.ts** - Vector embeddings for semantic search:
+  - Ollama integration with nomic-embed-text model (768 dimensions)
+  - Binary buffer conversion for SQLite storage
+  - Cosine similarity calculation for ranking results
+  - Functions: generateEmbedding, saveJobEmbedding, getJobEmbedding, searchSimilarJobs
+  - Batch generation: getJobsWithoutEmbeddings, generateAndSaveJobEmbedding
+  - Statistics: getEmbeddingStats for tracking coverage
 - **index.ts** - Step 1: Email scanning workflow (categorization and persistence)
 - **extract-jobs.ts** - Step 2: Job extraction workflow (URL extraction and job persistence)
 - **process-jobs.ts** - Step 3: Job description processing workflow:

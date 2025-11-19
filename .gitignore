@@ -6,6 +6,8 @@ dist/
 token.json
 credentials.json
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 .claude/settings.local.json
 credentials.json

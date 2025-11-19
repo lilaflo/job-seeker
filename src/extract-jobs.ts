@@ -87,17 +87,84 @@ Keep the summary professional, clear, and under 500 words. Focus on the most imp
 }
 
 /**
+ * Creates a job description from email body using Ollama
+ * Used for non-crawlable platforms like LinkedIn
+ */
+async function createDescriptionFromEmail(
+  emailBody: string,
+  jobTitle: string,
+  jobUrl: string,
+  model: string
+): Promise<string | null> {
+  try {
+    const ollama = getOllamaClient();
+
+    console.debug(`\n  → Creating description from email for: ${jobTitle}`);
+
+    const prompt = `You are a job description writer. Based on the email content below, create a structured job description summary.
+
+Email Content:
+${emailBody.substring(0, 5000)}
+
+Job Title: ${jobTitle}
+Job URL: ${jobUrl}
+
+Please extract and organize the available information into a structured job description. If information is missing, omit that section. Format as follows:
+
+**Role Overview:**
+[1-2 sentences describing the role based on email content]
+
+**Key Responsibilities:**
+[Bullet points of responsibilities if mentioned]
+
+**Requirements:**
+[Bullet points of required skills, experience, qualifications if mentioned]
+
+**Nice to Have:**
+[Bullet points of preferred qualifications if mentioned]
+
+**Work Details:**
+[Location, remote options, employment type if mentioned]
+
+**Additional Information:**
+[Any other relevant details from the email]
+
+Note: This description was generated from the email notification as the job page could not be crawled.
+
+Keep the summary professional, clear, and under 500 words. Only include sections where information is available in the email.`;
+
+    const response = await ollama.generate({
+      model,
+      prompt,
+      stream: false,
+      options: {
+        temperature: 0.3,
+        num_predict: 1000,
+      },
+    });
+
+    console.debug(`  ✓ Description created from email`);
+    return response.response.trim();
+  } catch (error) {
+    console.debug(
+      `  ✗ Failed to create description from email: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return null;
+  }
+}
+
+/**
  * Fetches and summarizes job description from URL
  */
 async function fetchJobDescription(
   url: string,
   title: string,
   model: string
-): Promise<string | null> {
+): Promise<{ description: string | null; salary: any }> {
   try {
     console.debug(`\n  → Fetching description for: ${title}`);
 
-    const scraped = await scrapeJobPage(url);
+    const scraped = await scrapeJobPage(url, model);
 
     if (
       scraped.error ||
@@ -107,7 +174,7 @@ async function fetchJobDescription(
       console.debug(
         `  ✗ Failed to scrape: ${scraped.error || "Insufficient content"}`
       );
-      return null;
+      return { description: null, salary: scraped.salary };
     }
 
     console.debug(`  → Summarizing with AI...`);
@@ -118,12 +185,12 @@ async function fetchJobDescription(
     );
     console.debug(`  ✓ Description saved`);
 
-    return summary;
+    return { description: summary, salary: scraped.salary };
   } catch (error) {
     console.debug(
       `  ✗ Error: ${error instanceof Error ? error.message : String(error)}`
     );
-    return null;
+    return { description: null, salary: { min: null, max: null, currency: null, period: null } };
   }
 }
 
@@ -184,6 +251,8 @@ async function main() {
     let skippedCount = 0;
     let newJobsCount = 0;
     let descriptionsCount = 0;
+    let emailDescriptionsCount = 0; // Descriptions created from email content
+    let webDescriptionsCount = 0; // Descriptions scraped from web
     let nonCrawlableSkipped = 0;
     const platformSkipReasons = new Map<string, string>(); // Track skip reasons by platform
     let currentEmailIndex = 0;
@@ -230,7 +299,7 @@ async function main() {
         const isCrawlable = canCrawlUrl(url);
 
         if (!isCrawlable) {
-          // Save job WITHOUT description (non-crawlable platform)
+          // Non-crawlable platform - create description from email if enabled
           const platform = getPlatformByDomain(url);
           const skipReason = getSkipReason(url);
 
@@ -238,8 +307,29 @@ async function main() {
             platformSkipReasons.set(platform.platform_name, skipReason);
           }
 
-          // Save to database without description
-          saveJob(title, url, email.id, undefined, undefined);
+          let description: string | undefined = undefined;
+
+          if (FETCH_DESCRIPTIONS && model && email.body) {
+            progressBar.stop();
+            description = await createDescriptionFromEmail(
+              email.body,
+              title,
+              url,
+              model
+            ) || undefined;
+            progressBar.start(emails.length, currentEmailIndex);
+
+            if (description) {
+              descriptionsCount++;
+              emailDescriptionsCount++;
+            }
+
+            // Add delay to be respectful
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+
+          // Save to database (with or without description)
+          saveJob(title, url, email.id, undefined, description);
           newJobsCount++;
           nonCrawlableSkipped++;
           continue;
@@ -247,14 +337,17 @@ async function main() {
 
         // Crawlable platform - fetch and summarize description if enabled
         let description: string | undefined = undefined;
+        let salary: any = undefined;
         if (FETCH_DESCRIPTIONS && model) {
           progressBar.stop();
-          description =
-            (await fetchJobDescription(url, title, model)) || undefined;
+          const result = await fetchJobDescription(url, title, model);
+          description = result.description || undefined;
+          salary = result.salary;
           progressBar.start(emails.length, currentEmailIndex);
 
           if (description) {
             descriptionsCount++;
+            webDescriptionsCount++;
           }
 
           // Add delay to be respectful
@@ -262,7 +355,7 @@ async function main() {
         }
 
         // Save job to database (with or without description)
-        saveJob(title, url, email.id, undefined, description);
+        saveJob(title, url, email.id, salary, description);
         newJobsCount++;
       }
 
@@ -284,19 +377,30 @@ async function main() {
     console.log(`Already scanned (skipped): ${extractedCount - newJobsCount}`);
 
     if (nonCrawlableSkipped > 0) {
-      console.log(`\nNon-crawlable jobs saved (without description): ${nonCrawlableSkipped}`);
+      console.log(`\nNon-crawlable jobs saved: ${nonCrawlableSkipped}`);
+      if (emailDescriptionsCount > 0) {
+        console.log(`  - With AI-generated descriptions from email: ${emailDescriptionsCount}`);
+        console.log(`  - Without descriptions: ${nonCrawlableSkipped - emailDescriptionsCount}`);
+      } else {
+        console.log(`  - (No descriptions - enable FETCH_DESCRIPTIONS to generate from email)`);
+      }
       platformSkipReasons.forEach((reason, platformName) => {
         console.log(`  - ${platformName}: ${reason}`);
       });
     }
 
     if (FETCH_DESCRIPTIONS) {
-      const crawlableJobs = newJobsCount - nonCrawlableSkipped;
       console.log(
-        `\nDescriptions fetched: ${descriptionsCount}/${crawlableJobs} crawlable jobs`
+        `\nDescriptions generated: ${descriptionsCount}/${newJobsCount} total jobs`
       );
-      if (descriptionsCount < crawlableJobs) {
-        console.log(`Failed to fetch: ${crawlableJobs - descriptionsCount}`);
+      if (webDescriptionsCount > 0) {
+        console.log(`  - From web scraping: ${webDescriptionsCount}`);
+      }
+      if (emailDescriptionsCount > 0) {
+        console.log(`  - From email content: ${emailDescriptionsCount}`);
+      }
+      if (descriptionsCount < newJobsCount) {
+        console.log(`  - Failed to generate: ${newJobsCount - descriptionsCount}`);
       }
     }
 
@@ -350,10 +454,17 @@ async function main() {
         let processFailureCount = 0;
 
         for (const job of jobsToProcess) {
-          const description = await fetchJobDescription(job.link, job.title, model);
+          const result = await fetchJobDescription(job.link, job.title, model);
 
-          if (description) {
-            saveJob(job.title, job.link, job.email_id, undefined, description);
+          if (result.description) {
+            // Convert null to undefined for salary fields
+            const salary = result.salary ? {
+              min: result.salary.min ?? undefined,
+              max: result.salary.max ?? undefined,
+              currency: result.salary.currency ?? undefined,
+              period: result.salary.period ?? undefined,
+            } : undefined;
+            saveJob(job.title, job.link, job.email_id ?? undefined, salary, result.description);
             processSuccessCount++;
           } else {
             processFailureCount++;
