@@ -130,7 +130,7 @@ Please extract and organize the available information into a structured job desc
 [Any other relevant details from the email]
 
 Note: This description was generated from the email notification as the job page could not be crawled.
-Original job posting: ${jobUrl}
+Original job posting: [here](${jobUrl})
 
 Keep the summary professional, clear, and under 500 words. Only include sections where information is available in the email.`;
 
