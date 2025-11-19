@@ -66,7 +66,7 @@
     </header>
 
     <!-- Action bar -->
-    <div class="bg-white p-4 rounded-lg mb-5 shadow-sm flex items-center gap-4">
+    <div class="bg-white p-4 rounded-lg mb-5 shadow-sm flex items-center gap-4 flex-wrap">
       <button
         class="px-5 py-2.5 rounded-md font-medium text-sm bg-gradient-to-br from-primary-500 to-primary-700 text-white inline-flex items-center gap-2 transition-all hover:shadow-lg hover:-translate-y-0.5 disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
         @click="startScan()"
@@ -80,21 +80,125 @@
         </template>
         <span x-show="scanning">Scanning...</span>
       </button>
+      <button
+        class="px-5 py-2.5 rounded-md font-medium text-sm bg-gray-100 text-gray-700 inline-flex items-center gap-2 transition-all hover:bg-gray-200 disabled:opacity-60 disabled:cursor-not-allowed"
+        @click="generateEmbeddings()"
+        :disabled="generatingEmbeddings"
+      >
+        <template x-if="generatingEmbeddings">
+          <div class="w-4 h-4 border-2 border-gray-400 border-t-gray-700 rounded-full animate-spin-fast"></div>
+        </template>
+        <span x-text="generatingEmbeddings ? 'Generating...' : 'Generate Embeddings'"></span>
+      </button>
+      <button
+        class="px-5 py-2.5 rounded-md font-medium text-sm bg-red-100 text-red-700 inline-flex items-center gap-2 transition-all hover:bg-red-200 disabled:opacity-60 disabled:cursor-not-allowed"
+        @click="resetDatabase()"
+        :disabled="resetting"
+      >
+        <template x-if="resetting">
+          <div class="w-4 h-4 border-2 border-red-400 border-t-red-700 rounded-full animate-spin-fast"></div>
+        </template>
+        <span x-text="resetting ? 'Resetting...' : 'Reset Database'"></span>
+      </button>
       <span
         class="text-sm"
-        :class="{ 'text-green-600': scanResult?.success, 'text-red-600': scanResult && !scanResult.success, 'text-gray-500': !scanResult }"
-        x-text="scanStatusMessage"
+        :class="{ 'text-green-600': scanResult?.success || embeddingResult?.success || resetResult?.success, 'text-red-600': (scanResult && !scanResult.success) || (embeddingResult && !embeddingResult.success) || (resetResult && !resetResult.success), 'text-gray-500': !scanResult && !embeddingResult && !resetResult }"
+        x-text="statusMessage"
       ></span>
     </div>
 
-    <!-- Filters -->
+    <!-- Scan Progress Panel -->
+    <div x-show="scanning || scannedEmails.length > 0" class="bg-white p-5 rounded-lg mb-5 shadow-sm">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-gray-800">
+          <span x-show="scanning">Scanning Emails...</span>
+          <span x-show="!scanning && scannedEmails.length > 0">Scan Results</span>
+        </h3>
+        <button
+          x-show="!scanning && scannedEmails.length > 0"
+          @click="scannedEmails = []"
+          class="text-sm text-gray-500 hover:text-gray-700"
+        >Clear</button>
+      </div>
+
+      <!-- Progress bar -->
+      <div x-show="scanning && scanProgress && scanProgress.total > 0" class="mb-3">
+        <div class="w-full bg-gray-200 rounded-full h-2">
+          <div
+            class="bg-primary-500 h-2 rounded-full transition-all"
+            :style="`width: ${scanProgress && scanProgress.total ? (scanProgress.current / scanProgress.total) * 100 : 0}%`"
+          ></div>
+        </div>
+        <p class="text-xs text-gray-500 mt-1" x-text="scanProgress ? scanProgress.message : ''"></p>
+      </div>
+
+      <!-- Scanned emails list -->
+      <div x-show="scannedEmails.length > 0" class="max-h-48 overflow-y-auto">
+        <template x-for="email in scannedEmails" :key="email.id">
+          <div class="flex items-center gap-3 py-2 border-b border-gray-100 last:border-0">
+            <span
+              class="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-xs"
+              :class="email.isJobRelated ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'"
+            >
+              <span x-text="email.isJobRelated ? '✓' : '✗'"></span>
+            </span>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-gray-800 truncate" x-text="email.subject || 'No subject'"></p>
+              <p class="text-xs text-gray-500 truncate" x-text="email.from || 'Unknown sender'"></p>
+            </div>
+            <span
+              class="flex-shrink-0 text-xs px-2 py-0.5 rounded"
+              :class="{
+                'bg-green-100 text-green-700': email.confidence === 'high',
+                'bg-yellow-100 text-yellow-700': email.confidence === 'medium',
+                'bg-gray-100 text-gray-600': email.confidence === 'low'
+              }"
+              x-text="email.confidence"
+            ></span>
+          </div>
+        </template>
+      </div>
+
+      <!-- Empty state when no emails processed -->
+      <div x-show="!scanning && scannedEmails.length === 0 && scanResult" class="text-center py-4 text-gray-500">
+        <p x-text="scanResult ? (scanResult.message || 'No new emails to process') : ''"></p>
+      </div>
+    </div>
+
+    <!-- Search -->
     <div class="bg-white p-5 rounded-lg mb-5 shadow-sm">
-      <input
-        type="text"
-        x-model.debounce.300ms="searchTerm"
-        placeholder="Search jobs by title, link, or description..."
-        class="px-4 py-2.5 border border-gray-300 rounded-md w-full max-w-md text-base focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/10"
-      />
+      <div class="flex items-center gap-4 flex-wrap">
+        <input
+          type="text"
+          x-model="searchTerm"
+          @keydown.enter="smartSearchEnabled ? performSmartSearch() : null"
+          :placeholder="smartSearchEnabled ? 'Semantic search (press Enter)...' : 'Search jobs by title, link, or description...'"
+          class="px-4 py-2.5 border border-gray-300 rounded-md w-full max-w-md text-base focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/10"
+        />
+        <label class="flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            x-model="smartSearchEnabled"
+            @change="if (!smartSearchEnabled) fetchJobs()"
+            class="w-4 h-4 text-primary-500 rounded focus:ring-primary-500"
+          />
+          <span class="text-sm text-gray-600">Smart Search</span>
+        </label>
+        <button
+          x-show="smartSearchEnabled && searchTerm"
+          @click="performSmartSearch()"
+          :disabled="searching"
+          class="px-4 py-2 rounded-md font-medium text-sm bg-primary-500 text-white hover:bg-primary-600 disabled:opacity-60 inline-flex items-center gap-2"
+        >
+          <template x-if="searching">
+            <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin-fast"></div>
+          </template>
+          <span>Search</span>
+        </button>
+      </div>
+      <p x-show="smartSearchEnabled" class="text-xs text-gray-500 mt-2">
+        Smart Search uses AI to find semantically similar jobs (requires embeddings)
+      </p>
     </div>
 
     <!-- Table -->
@@ -105,29 +209,24 @@
             <tr>
               <th
                 @click="toggleSort('title')"
-                :class="{ 'after:content-[\"_↑\"]': sortColumn === 'title' && sortDirection === 'asc', 'after:content-[\"_↓\"]': sortColumn === 'title' && sortDirection === 'desc' }"
                 class="px-4 py-3 text-left bg-gray-50 font-semibold text-gray-600 sticky top-0 cursor-pointer select-none hover:bg-gray-100 border-b border-gray-200"
-              >Title</th>
+              >Title <span x-show="sortColumn === 'title'" x-text="sortDirection === 'asc' ? '↑' : '↓'"></span></th>
               <th
                 @click="toggleSort('link')"
-                :class="{ 'after:content-[\"_↑\"]': sortColumn === 'link' && sortDirection === 'asc', 'after:content-[\"_↓\"]': sortColumn === 'link' && sortDirection === 'desc' }"
                 class="px-4 py-3 text-left bg-gray-50 font-semibold text-gray-600 sticky top-0 cursor-pointer select-none hover:bg-gray-100 border-b border-gray-200"
-              >Link</th>
+              >Link <span x-show="sortColumn === 'link'" x-text="sortDirection === 'asc' ? '↑' : '↓'"></span></th>
               <th
                 @click="toggleSort('salary_min')"
-                :class="{ 'after:content-[\"_↑\"]': sortColumn === 'salary_min' && sortDirection === 'asc', 'after:content-[\"_↓\"]': sortColumn === 'salary_min' && sortDirection === 'desc' }"
                 class="px-4 py-3 text-left bg-gray-50 font-semibold text-gray-600 sticky top-0 cursor-pointer select-none hover:bg-gray-100 border-b border-gray-200"
-              >Salary</th>
+              >Salary <span x-show="sortColumn === 'salary_min'" x-text="sortDirection === 'asc' ? '↑' : '↓'"></span></th>
               <th
                 @click="toggleSort('description')"
-                :class="{ 'after:content-[\"_↑\"]': sortColumn === 'description' && sortDirection === 'asc', 'after:content-[\"_↓\"]': sortColumn === 'description' && sortDirection === 'desc' }"
                 class="px-4 py-3 text-left bg-gray-50 font-semibold text-gray-600 sticky top-0 cursor-pointer select-none hover:bg-gray-100 border-b border-gray-200"
-              >Description</th>
+              >Description <span x-show="sortColumn === 'description'" x-text="sortDirection === 'asc' ? '↑' : '↓'"></span></th>
               <th
                 @click="toggleSort('created_at')"
-                :class="{ 'after:content-[\"_↑\"]': sortColumn === 'created_at' && sortDirection === 'asc', 'after:content-[\"_↓\"]': sortColumn === 'created_at' && sortDirection === 'desc' }"
                 class="px-4 py-3 text-left bg-gray-50 font-semibold text-gray-600 sticky top-0 cursor-pointer select-none hover:bg-gray-100 border-b border-gray-200"
-              >Date</th>
+              >Date <span x-show="sortColumn === 'created_at'" x-text="sortDirection === 'asc' ? '↑' : '↓'"></span></th>
             </tr>
           </thead>
           <tbody>
@@ -245,6 +344,15 @@
         selectedJob: null,
         scanning: false,
         scanResult: null,
+        generatingEmbeddings: false,
+        embeddingResult: null,
+        smartSearchEnabled: false,
+        searching: false,
+        resetting: false,
+        resetResult: null,
+        ws: null,
+        scannedEmails: [],
+        scanProgress: null,
 
         // Computed properties
         get jobsWithSalary() {
@@ -255,22 +363,48 @@
           return this.jobs.filter(j => j.description !== null).length;
         },
 
-        get scanStatusMessage() {
-          if (!this.scanResult) return '';
-          if (this.scanResult.success) {
-            if (this.scanResult.processed === 0) {
-              return this.scanResult.message;
-            }
-            return `Processed ${this.scanResult.processed} emails, ${this.scanResult.jobRelated} job-related`;
+        get statusMessage() {
+          // Show real-time scan progress if scanning
+          if (this.scanning && this.scanProgress) {
+            return this.scanProgress.message;
           }
-          return this.scanResult.error || 'Scan failed';
+          if (this.resetResult) {
+            if (this.resetResult.success) {
+              return this.resetResult.message;
+            }
+            return this.resetResult.error || 'Reset failed';
+          }
+          if (this.embeddingResult) {
+            if (this.embeddingResult.success) {
+              return this.embeddingResult.message;
+            }
+            return this.embeddingResult.error || 'Embedding generation failed';
+          }
+          if (this.scanResult) {
+            if (this.scanResult.success) {
+              if (this.scanResult.processed === 0) {
+                return this.scanResult.message;
+              }
+              return `Processed ${this.scanResult.processed} emails, ${this.scanResult.jobRelated} job-related`;
+            }
+            return this.scanResult.error || 'Scan failed';
+          }
+          return '';
         },
 
         get filteredJobs() {
           let result = this.jobs;
 
-          // Filter by search term
-          if (this.searchTerm) {
+          // Skip client-side filtering if using smart search (server handles it)
+          if (this.smartSearchEnabled) {
+            // For smart search, just sort by similarity if available
+            if (result.length > 0 && result[0].similarity !== undefined) {
+              return result; // Already sorted by similarity from server
+            }
+          }
+
+          // Filter by search term (client-side)
+          if (this.searchTerm && !this.smartSearchEnabled) {
             const term = this.searchTerm.toLowerCase();
             result = result.filter(job =>
               (job.title && job.title.toLowerCase().includes(term)) ||
@@ -302,7 +436,68 @@
 
         // Methods
         async init() {
+          console.debug('Initializing app...');
           await this.fetchJobs();
+          this.connectWebSocket();
+          console.debug('App initialized');
+        },
+
+        connectWebSocket() {
+          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          const wsUrl = `${protocol}//${window.location.host}`;
+
+          this.ws = new WebSocket(wsUrl);
+
+          this.ws.onopen = () => {
+            console.debug('WebSocket connected');
+          };
+
+          this.ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            this.handleWebSocketMessage(data);
+          };
+
+          this.ws.onclose = () => {
+            console.debug('WebSocket disconnected, reconnecting in 3s...');
+            setTimeout(() => this.connectWebSocket(), 3000);
+          };
+
+          this.ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+          };
+        },
+
+        handleWebSocketMessage(data) {
+          console.debug('WebSocket message:', data.type, data);
+          switch (data.type) {
+            case 'scan_progress':
+              this.scanProgress = data;
+              break;
+
+            case 'email_processed':
+              console.debug('Email processed:', data.email);
+              // Add to scanned emails list (avoid duplicates)
+              if (!this.scannedEmails.some(e => e.id === data.email.id)) {
+                this.scannedEmails.unshift(data.email);
+                console.debug('Added to list, total:', this.scannedEmails.length);
+              }
+              break;
+
+            case 'scan_complete':
+              this.scanResult = data.result;
+              this.scanProgress = null;
+              // Refresh jobs list after scan completes
+              this.fetchJobs();
+              break;
+
+            case 'scan_error':
+              this.scanResult = {
+                success: false,
+                error: data.error
+              };
+              this.scanProgress = null;
+              break;
+          }
         },
 
         async fetchJobs() {
@@ -310,10 +505,12 @@
             this.loading = true;
             this.error = null;
 
+            console.debug('Fetching jobs...');
             const response = await fetch('/api/jobs?limit=500');
             if (!response.ok) throw new Error('Failed to fetch jobs');
 
             const data = await response.json();
+            console.debug('Jobs fetched:', data.jobs?.length || 0);
             this.jobs = data.jobs || [];
           } catch (err) {
             console.error('Error fetching jobs:', err);
@@ -350,16 +547,20 @@
           try {
             this.scanning = true;
             this.scanResult = null;
+            this.embeddingResult = null;
+            this.resetResult = null;
+            this.scannedEmails = [];
+            this.scanProgress = null;
 
             const response = await fetch('/api/scan', {
               method: 'POST',
             });
 
             const result = await response.json();
-            this.scanResult = result;
-
-            // Refresh jobs list if scan was successful
-            if (result.success && result.processed > 0) {
+            // Result will also come via WebSocket, but we handle HTTP response for non-WS clients
+            if (!this.scanResult) {
+              this.scanResult = result;
+              // Refresh jobs list
               await this.fetchJobs();
             }
           } catch (err) {
@@ -370,6 +571,95 @@
             };
           } finally {
             this.scanning = false;
+          }
+        },
+
+        async generateEmbeddings() {
+          if (this.generatingEmbeddings) return;
+
+          try {
+            this.generatingEmbeddings = true;
+            this.embeddingResult = null;
+            this.scanResult = null;
+
+            const response = await fetch('/api/embeddings/generate', {
+              method: 'POST',
+            });
+
+            const result = await response.json();
+            this.embeddingResult = result;
+          } catch (err) {
+            console.error('Error generating embeddings:', err);
+            this.embeddingResult = {
+              success: false,
+              error: 'Failed to generate embeddings. Is Ollama running?'
+            };
+          } finally {
+            this.generatingEmbeddings = false;
+          }
+        },
+
+        async resetDatabase() {
+          if (this.resetting) return;
+
+          if (!confirm('Are you sure you want to reset the database? This will delete ALL jobs, emails, and embeddings.')) {
+            return;
+          }
+
+          try {
+            this.resetting = true;
+            this.resetResult = null;
+            this.scanResult = null;
+            this.embeddingResult = null;
+
+            const response = await fetch('/api/reset', {
+              method: 'POST',
+            });
+
+            const result = await response.json();
+            this.resetResult = result;
+
+            // Refresh jobs list after reset
+            if (result.success) {
+              await this.fetchJobs();
+            }
+          } catch (err) {
+            console.error('Error resetting database:', err);
+            this.resetResult = {
+              success: false,
+              error: 'Failed to reset database.'
+            };
+          } finally {
+            this.resetting = false;
+          }
+        },
+
+        async performSmartSearch() {
+          if (this.searching || !this.searchTerm) return;
+
+          try {
+            this.searching = true;
+            this.error = null;
+
+            const response = await fetch('/api/jobs/search', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                query: this.searchTerm,
+                limit: 50,
+                minSimilarity: 0.2
+              })
+            });
+
+            if (!response.ok) throw new Error('Search failed');
+
+            const data = await response.json();
+            this.jobs = data.jobs || [];
+          } catch (err) {
+            console.error('Error during search:', err);
+            this.error = 'Search failed. Make sure embeddings are generated.';
+          } finally {
+            this.searching = false;
           }
         },
 

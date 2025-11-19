@@ -52,7 +52,20 @@ An automation tool that scans Gmail for job-related emails, extracts job descrip
 - ✅ **Smart Filtering** - Automatically skips non-crawlable platforms (e.g., LinkedIn requires multi-level authentication)
 - ✅ **Smart Processing** - Skips jobs that already have descriptions, with rate limiting for respectful scraping
 - ✅ **Platform Tracking in Emails** - Each email linked to its source platform (LinkedIn, Indeed, etc.) via foreign key
-- ✅ **Comprehensive Unit Tests** - Full test coverage with 233 passing tests using Vitest
+- ✅ **Vector Search (RAG)** - Semantic job search using vector embeddings:
+  - **Ollama embeddings**: Uses nomic-embed-text model (768 dimensions) for semantic understanding
+  - **SQLite storage**: Embeddings stored as binary BLOBs for efficient retrieval
+  - **Cosine similarity**: Rank jobs by semantic relevance to search queries
+  - **Smart search toggle**: UI switch between keyword and semantic search
+  - **Embedding generation**: One-click generation for all jobs without embeddings
+  - **API endpoints**: `/api/jobs/search` for semantic search, `/api/embeddings/generate` for batch generation
+- ✅ **Real-time WebSocket Updates** - Live progress during email scanning:
+  - **WebSocket server**: Streams scan progress to all connected clients
+  - **Live email display**: Shows each processed email immediately with checkmark/X indicator
+  - **Progress bar**: Visual progress indicator during categorization
+  - **Confidence badges**: Color-coded confidence levels (high/medium/low)
+  - **Auto-reconnect**: Reconnects automatically if connection drops
+- ✅ **Comprehensive Unit Tests** - Full test coverage with 262 passing tests using Vitest
 
 ### Coming Soon
 
@@ -184,6 +197,14 @@ This creates `job-seeker.db` with the following structure:
 - Linked to emails via platform_id foreign key for automatic sender tracking
 - Indexes: Optimized for hostname and crawlability lookups
 
+**job_embeddings table**: Stores vector embeddings for semantic search
+- job_id (FK, primary key), embedding (BLOB), embedding_dim, model, created_at
+- Foreign key to jobs table with CASCADE delete
+- embedding: Binary BLOB storing float32 array for vector search
+- embedding_dim: Dimension of embedding vector (768 for nomic-embed-text)
+- model: Name of embedding model used (nomic-embed-text)
+- Index on model for filtering by embedding source
+
 **migrations table**: Tracks applied database migrations
 - id, filename (unique), applied_at
 - Automatically managed by `migrate.sh`
@@ -292,6 +313,20 @@ ORDER BY jsm.relevance_score DESC;
 
 # View applied migrations
 SELECT * FROM migrations ORDER BY applied_at;
+
+# View embedding statistics
+SELECT COUNT(*) as total_embeddings FROM job_embeddings;
+
+# View jobs with embeddings
+SELECT j.title, je.model, je.embedding_dim
+FROM jobs j
+JOIN job_embeddings je ON j.id = je.job_id
+LIMIT 10;
+
+# Find jobs without embeddings
+SELECT j.id, j.title FROM jobs j
+LEFT JOIN job_embeddings je ON j.id = je.job_id
+WHERE je.job_id IS NULL;
 ```
 
 ### 5. Create Your Skills Profile (Optional)
@@ -344,6 +379,11 @@ Then open http://localhost:3001 in your browser.
 **API Endpoints:**
 - `GET /api/jobs?limit=100` - Fetch job listings with optional limit
 - `GET /api/platforms` - Fetch platform information
+- `POST /api/scan` - Trigger email scan
+- `GET /api/scan/status` - Check scan status
+- `POST /api/jobs/search` - Semantic search (body: `{query, limit, minSimilarity}`)
+- `POST /api/embeddings/generate` - Generate embeddings for all jobs
+- `POST /api/reset` - Reset database (delete and run migrations)
 
 ### Step 1: Scan and Categorize Emails
 
@@ -627,19 +667,23 @@ job-seeker/
 │   ├── 005_add_salary_estimation_to_jobs.sql # Initial salary column (deprecated)
 │   ├── 006_split_salary_to_min_max.sql      # Structured salary fields (min/max/currency/period)
 │   ├── 007_add_description_to_jobs.sql      # Job description field for AI summaries
-│   └── 008_add_processed_to_emails.sql      # Processed flag to prevent email reprocessing
+│   ├── 008_add_processed_to_emails.sql      # Processed flag to prevent email reprocessing
+│   ├── 009_create_platforms_table.sql       # Platform crawlability management
+│   ├── 010_add_from_to_emails.sql           # Sender tracking for emails
+│   └── 011_create_job_embeddings_table.sql  # Vector embeddings for semantic search
 ├── public/
 │   └── index.html                 # Single-page job listing web interface
 ├── src/
-│   ├── __tests__/                  # Unit tests (233 tests passing)
+│   ├── __tests__/                  # Unit tests (262 tests passing)
 │   │   ├── gmail-auth.test.ts      # 8 tests for OAuth authentication
 │   │   ├── email-scanner.test.ts   # 14 tests for email fetching
 │   │   ├── email-categorizer.test.ts # 13 tests for AI categorization
 │   │   ├── job-portal-domains.test.ts # 15 tests for domain whitelisting
 │   │   ├── url-extractor.test.ts   # 28 tests for URL extraction
 │   │   ├── job-scraper.test.ts     # 43 tests for salary extraction (ranges, single values, formats, currencies, periods)
-│   │   ├── database.test.ts        # 93 tests for database operations (emails, jobs, skills, salary, descriptions, processed)
-│   │   └── server.test.ts          # 19 tests for web server API endpoints
+│   │   ├── database.test.ts        # 96 tests for database operations (emails, jobs, skills, salary, descriptions, processed)
+│   │   ├── server.test.ts          # 27 tests for web server API endpoints
+│   │   └── embeddings.test.ts      # 18 tests for vector embeddings and semantic search
 │   ├── email-categorizer.ts        # AI-powered categorization with Ollama
 │   ├── email-scanner.ts            # Email fetching with progress bars
 │   ├── gmail-auth.ts               # Gmail OAuth authentication
@@ -647,6 +691,7 @@ job-seeker/
 │   ├── url-extractor.ts            # Job URL extraction and title parsing
 │   ├── job-scraper.ts              # Web scraping module for job pages (cheerio)
 │   ├── database.ts                 # SQLite database operations (emails, jobs, skills, matching, descriptions)
+│   ├── embeddings.ts               # Vector embeddings module for semantic search (Ollama + cosine similarity)
 │   ├── index.ts                    # Main entry point (Step 1: Email scanning)
 │   ├── extract-jobs.ts             # Job extraction script (Step 2: Job URL extraction)
 │   ├── process-jobs.ts             # Job processing script (Step 3: Scrape & summarize descriptions)
@@ -908,6 +953,13 @@ pnpm build
   - Match percentage calculation for job compatibility
   - Query functions for finding matching jobs by skill requirements
   - COALESCE updates to preserve existing data
+- **embeddings.ts** - Vector embeddings for semantic search:
+  - Ollama integration with nomic-embed-text model (768 dimensions)
+  - Binary buffer conversion for SQLite storage
+  - Cosine similarity calculation for ranking results
+  - Functions: generateEmbedding, saveJobEmbedding, getJobEmbedding, searchSimilarJobs
+  - Batch generation: getJobsWithoutEmbeddings, generateAndSaveJobEmbedding
+  - Statistics: getEmbeddingStats for tracking coverage
 - **index.ts** - Step 1: Email scanning workflow (categorization and persistence)
 - **extract-jobs.ts** - Step 2: Job extraction workflow (URL extraction and job persistence)
 - **process-jobs.ts** - Step 3: Job description processing workflow:

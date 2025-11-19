@@ -7,11 +7,30 @@
 import http from 'http';
 import path from 'path';
 import fs from 'fs';
-import { getJobs, getJobStats, getPlatforms, deleteJob } from './database';
-import { runScan, type ScanResult } from './scan-runner';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { WebSocketServer, WebSocket } from 'ws';
+import { getJobs, getJobStats, getPlatforms, deleteJob, closeDatabase } from './database';
+
+const execAsync = promisify(exec);
 
 // Track if a scan is currently running
 let scanInProgress = false;
+
+// Connected WebSocket clients
+const wsClients = new Set<WebSocket>();
+
+/**
+ * Broadcast message to all connected WebSocket clients
+ */
+function broadcast(message: object): void {
+  const data = JSON.stringify(message);
+  wsClients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(data);
+    }
+  });
+}
 
 const PORT = process.env.PORT || 3001;
 
@@ -131,9 +150,32 @@ async function handleScanApi(res: http.ServerResponse): Promise<void> {
   try {
     scanInProgress = true;
 
-    const result: ScanResult = await runScan({
+    // Dynamic import to avoid loading Gmail/Ollama dependencies at server startup
+    const { runScan } = await import('./scan-runner');
+
+    const result = await runScan({
       query: 'newer_than:7d',
       maxResults: 50,
+      onEmailProcessed: (email) => {
+        // Broadcast each processed email via WebSocket
+        broadcast({
+          type: 'email_processed',
+          email
+        });
+      },
+      onProgress: (event) => {
+        // Broadcast progress updates via WebSocket
+        broadcast({
+          type: 'scan_progress',
+          ...event
+        });
+      }
+    });
+
+    // Broadcast completion
+    broadcast({
+      type: 'scan_complete',
+      result
     });
 
     res.writeHead(200, {
@@ -143,6 +185,13 @@ async function handleScanApi(res: http.ServerResponse): Promise<void> {
     res.end(JSON.stringify(result));
   } catch (error) {
     console.error('Scan error:', error);
+
+    // Broadcast error
+    broadcast({
+      type: 'scan_error',
+      error: error instanceof Error ? error.message : 'Scan failed'
+    });
+
     res.writeHead(500, {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*'
@@ -165,6 +214,144 @@ function handleScanStatusApi(res: http.ServerResponse): void {
     'Access-Control-Allow-Origin': '*'
   });
   res.end(JSON.stringify({ scanning: scanInProgress }));
+}
+
+/**
+ * API endpoint for semantic search
+ */
+async function handleSearchApi(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  try {
+    // Parse request body
+    let body = '';
+    for await (const chunk of req) {
+      body += chunk;
+    }
+
+    const { query, limit = 20, minSimilarity = 0.3 } = JSON.parse(body);
+
+    if (!query || typeof query !== 'string') {
+      res.writeHead(400, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      });
+      res.end(JSON.stringify({ error: 'Query is required' }));
+      return;
+    }
+
+    // Dynamic import to avoid loading dependencies at startup
+    const { searchSimilarJobs, getEmbeddingStats } = await import('./embeddings');
+
+    const jobs = await searchSimilarJobs(query, { limit, minSimilarity });
+    const stats = getEmbeddingStats();
+
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify({ jobs, stats }));
+  } catch (error) {
+    console.error('Search error:', error);
+    res.writeHead(500, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify({
+      error: error instanceof Error ? error.message : 'Search failed'
+    }));
+  }
+}
+
+/**
+ * API endpoint to reset database (delete and run migrations)
+ */
+async function handleResetDatabaseApi(res: http.ServerResponse): Promise<void> {
+  try {
+    const dbPath = path.join(process.cwd(), 'job-seeker.db');
+    const walPath = dbPath + '-wal';
+    const shmPath = dbPath + '-shm';
+
+    // Close the database connection first
+    closeDatabase();
+
+    // Delete database files
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+    if (fs.existsSync(walPath)) fs.unlinkSync(walPath);
+    if (fs.existsSync(shmPath)) fs.unlinkSync(shmPath);
+
+    // Run migrations
+    const { stdout, stderr } = await execAsync('./migrate.sh');
+
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify({
+      success: true,
+      message: 'Database reset successfully',
+      output: stdout
+    }));
+  } catch (error) {
+    console.error('Reset database error:', error);
+    res.writeHead(500, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify({
+      error: error instanceof Error ? error.message : 'Failed to reset database'
+    }));
+  }
+}
+
+/**
+ * API endpoint to generate embeddings for jobs
+ */
+async function handleGenerateEmbeddingsApi(res: http.ServerResponse): Promise<void> {
+  try {
+    const { getJobsWithoutEmbeddings, generateAndSaveJobEmbedding, getEmbeddingStats } = await import('./embeddings');
+
+    const jobsToProcess = getJobsWithoutEmbeddings();
+
+    if (jobsToProcess.length === 0) {
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      });
+      res.end(JSON.stringify({
+        success: true,
+        message: 'All jobs already have embeddings',
+        processed: 0,
+        stats: getEmbeddingStats()
+      }));
+      return;
+    }
+
+    // Process jobs
+    let processed = 0;
+    for (const job of jobsToProcess) {
+      await generateAndSaveJobEmbedding(job.id, job.title, job.description);
+      processed++;
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify({
+      success: true,
+      message: `Generated embeddings for ${processed} jobs`,
+      processed,
+      stats: getEmbeddingStats()
+    }));
+  } catch (error) {
+    console.error('Embedding generation error:', error);
+    res.writeHead(500, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify({
+      error: error instanceof Error ? error.message : 'Embedding generation failed'
+    }));
+  }
 }
 
 /**
@@ -195,6 +382,24 @@ function requestHandler(req: http.IncomingMessage, res: http.ServerResponse): vo
   // GET /api/scan/status - check scan status
   if (url === '/api/scan/status' && req.method === 'GET') {
     handleScanStatusApi(res);
+    return;
+  }
+
+  // POST /api/jobs/search - semantic search
+  if (url === '/api/jobs/search' && req.method === 'POST') {
+    handleSearchApi(req, res);
+    return;
+  }
+
+  // POST /api/embeddings/generate - generate embeddings for jobs
+  if (url === '/api/embeddings/generate' && req.method === 'POST') {
+    handleGenerateEmbeddingsApi(res);
+    return;
+  }
+
+  // POST /api/reset - reset database (delete and run migrations)
+  if (url === '/api/reset' && req.method === 'POST') {
+    handleResetDatabaseApi(res);
     return;
   }
 
@@ -231,13 +436,35 @@ function requestHandler(req: http.IncomingMessage, res: http.ServerResponse): vo
 // Create and start server
 const server = http.createServer(requestHandler);
 
+// Create WebSocket server
+const wss = new WebSocketServer({ server });
+
+wss.on('connection', (ws) => {
+  console.debug('WebSocket client connected');
+  wsClients.add(ws);
+
+  ws.on('close', () => {
+    console.debug('WebSocket client disconnected');
+    wsClients.delete(ws);
+  });
+
+  ws.on('error', (error) => {
+    console.error('WebSocket error:', error);
+    wsClients.delete(ws);
+  });
+});
+
 server.listen(PORT, () => {
   console.log(`\n🚀 Job Seeker Web Server running at http://localhost:${PORT}`);
+  console.log(`   WebSocket: ws://localhost:${PORT}`);
   console.log(`   API endpoints:`);
   console.log(`   - GET  /api/jobs - Fetch job listings`);
   console.log(`   - GET  /api/platforms - Fetch platform info`);
   console.log(`   - POST /api/scan - Trigger email scan`);
-  console.log(`   - GET  /api/scan/status - Check scan status\n`);
+  console.log(`   - GET  /api/scan/status - Check scan status`);
+  console.log(`   - POST /api/jobs/search - Semantic search`);
+  console.log(`   - POST /api/embeddings/generate - Generate embeddings`);
+  console.log(`   - POST /api/reset - Reset database\n`);
 });
 
 // Handle graceful shutdown

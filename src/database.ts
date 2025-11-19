@@ -62,7 +62,7 @@ let db: Database.Database | null = null;
 /**
  * Gets or creates the database connection
  */
-function getDatabase(): Database.Database {
+export function getDatabase(): Database.Database {
   if (!db) {
     // Allow test environment to override database path
     const dbName = process.env.NODE_ENV === 'test' ? 'job-seeker.test.db' : 'job-seeker.db';

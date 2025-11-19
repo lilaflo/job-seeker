@@ -26,6 +26,25 @@ export interface ScanResult {
 export interface ScanOptions {
   query?: string;
   maxResults?: number;
+  onEmailProcessed?: (email: ProcessedEmailEvent) => void;
+  onProgress?: (event: ScanProgressEvent) => void;
+}
+
+export interface ProcessedEmailEvent {
+  id: string;
+  subject: string | null;
+  from: string | null;
+  isJobRelated: boolean;
+  confidence: 'high' | 'medium' | 'low';
+  reason: string;
+  processedAt: string;
+}
+
+export interface ScanProgressEvent {
+  type: 'start' | 'fetching' | 'categorizing' | 'complete';
+  total?: number;
+  current?: number;
+  message: string;
 }
 
 /**
@@ -33,7 +52,14 @@ export interface ScanOptions {
  * Returns results instead of using process.exit
  */
 export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
-  const { query = 'newer_than:7d', maxResults = 20 } = options;
+  const { query = 'newer_than:7d', maxResults = 20, onEmailProcessed, onProgress } = options;
+
+  // Helper to emit progress
+  const emitProgress = (event: ScanProgressEvent) => {
+    if (onProgress) onProgress(event);
+  };
+
+  emitProgress({ type: 'start', message: 'Starting email scan...' });
 
   // Authorize with Gmail
   const auth = await authorize();
@@ -49,6 +75,8 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
   const model = await getBestModel();
 
   // Fetch emails
+  emitProgress({ type: 'fetching', message: 'Fetching emails from Gmail...' });
+
   const emails = await fetchEmails(auth, {
     query,
     maxResults,
@@ -57,6 +85,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
 
   if (emails.length === 0) {
     const stats = getEmailStats();
+    emitProgress({ type: 'complete', message: 'No emails found to process' });
     return {
       success: true,
       message: 'No emails found to process',
@@ -74,6 +103,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
 
   if (newEmails.length === 0) {
     const stats = getEmailStats();
+    emitProgress({ type: 'complete', message: 'All emails have already been scanned' });
     return {
       success: true,
       message: 'All emails have already been scanned',
@@ -85,10 +115,19 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
   }
 
   // Fetch email bodies
+  emitProgress({ type: 'fetching', message: `Fetching ${newEmails.length} email bodies...` });
   const emailIds = newEmails.map(e => e.id);
   const bodies = await fetchEmailBodies(auth, emailIds, false); // Disable progress bars
 
   // Categorize and save emails
+  emitProgress({
+    type: 'categorizing',
+    total: newEmails.length,
+    current: 0,
+    message: `Categorizing ${newEmails.length} emails...`
+  });
+
+  let processedCount = 0;
   const categorizedEmails = await processEmailsWithProgress<CategorizedEmail>(
     newEmails,
     async (email) => {
@@ -107,6 +146,27 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
       // Mark email as processed to prevent reprocessing
       markEmailAsProcessed(categorizedEmail.id);
 
+      // Emit event for this processed email
+      processedCount++;
+      if (onEmailProcessed) {
+        onEmailProcessed({
+          id: email.id,
+          subject: email.subject || null,
+          from: email.from || null,
+          isJobRelated: category.isJobRelated,
+          confidence: category.confidence,
+          reason: category.reason,
+          processedAt: new Date().toISOString(),
+        });
+      }
+
+      emitProgress({
+        type: 'categorizing',
+        total: newEmails.length,
+        current: processedCount,
+        message: `Categorized ${processedCount}/${newEmails.length} emails`
+      });
+
       return categorizedEmail;
     },
     { title: 'Categorizing & Saving Emails', showProgress: false }
@@ -115,6 +175,11 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
   // Calculate results
   const jobRelatedCount = categorizedEmails.filter(e => e.category.isJobRelated).length;
   const stats = getEmailStats();
+
+  emitProgress({
+    type: 'complete',
+    message: `Processed ${categorizedEmails.length} emails, ${jobRelatedCount} job-related`
+  });
 
   return {
     success: true,
