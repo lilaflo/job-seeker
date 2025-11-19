@@ -12,5 +12,7 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json", "html"],
     },
+    // Run test files sequentially to avoid SQLite database locking issues
+    fileParallelism: false,
   },
 });

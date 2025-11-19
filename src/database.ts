@@ -18,6 +18,16 @@ export interface StoredEmail {
   scanned_at: string;
 }
 
+export interface StoredLog {
+  id: number;
+  level: 'error' | 'warning' | 'info' | 'debug';
+  message: string;
+  source: string | null;
+  context: string | null;
+  stack_trace: string | null;
+  created_at: string;
+}
+
 export interface StoredJob {
   id: number;
   title: string;
@@ -1000,4 +1010,160 @@ export function getPlatformStats(): {
     crawlable,
     nonCrawlable,
   };
+}
+
+// ============================================================================
+// Log Management Functions
+// ============================================================================
+
+/**
+ * Saves a log entry to the database
+ */
+export function saveLog(
+  level: 'error' | 'warning' | 'info' | 'debug',
+  message: string,
+  options?: {
+    source?: string;
+    context?: Record<string, any>;
+    stackTrace?: string;
+  }
+): void {
+  const database = getDatabase();
+
+  const stmt = database.prepare(`
+    INSERT INTO logs (level, message, source, context, stack_trace)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+
+  stmt.run(
+    level,
+    message,
+    options?.source || null,
+    options?.context ? JSON.stringify(options.context) : null,
+    options?.stackTrace || null
+  );
+}
+
+/**
+ * Gets all logs matching filter criteria
+ */
+export function getLogs(filter?: {
+  level?: 'error' | 'warning' | 'info' | 'debug';
+  source?: string;
+  limit?: number;
+  offset?: number;
+}): StoredLog[] {
+  const database = getDatabase();
+
+  let query = 'SELECT * FROM logs WHERE 1=1';
+  const params: any[] = [];
+
+  if (filter?.level) {
+    query += ' AND level = ?';
+    params.push(filter.level);
+  }
+
+  if (filter?.source) {
+    query += ' AND source = ?';
+    params.push(filter.source);
+  }
+
+  query += ' ORDER BY created_at DESC, id DESC';
+
+  if (filter?.limit) {
+    query += ' LIMIT ?';
+    params.push(filter.limit);
+  }
+
+  if (filter?.offset) {
+    query += ' OFFSET ?';
+    params.push(filter.offset);
+  }
+
+  const stmt = database.prepare(query);
+  return stmt.all(...params) as StoredLog[];
+}
+
+/**
+ * Gets log statistics
+ */
+export function getLogStats(): {
+  total: number;
+  errors: number;
+  warnings: number;
+  info: number;
+  debug: number;
+} {
+  const database = getDatabase();
+
+  const total = (database.prepare('SELECT COUNT(*) as count FROM logs').get() as { count: number }).count;
+  const errors = (database.prepare('SELECT COUNT(*) as count FROM logs WHERE level = ?').get('error') as { count: number }).count;
+  const warnings = (database.prepare('SELECT COUNT(*) as count FROM logs WHERE level = ?').get('warning') as { count: number }).count;
+  const info = (database.prepare('SELECT COUNT(*) as count FROM logs WHERE level = ?').get('info') as { count: number }).count;
+  const debug = (database.prepare('SELECT COUNT(*) as count FROM logs WHERE level = ?').get('debug') as { count: number }).count;
+
+  return {
+    total,
+    errors,
+    warnings,
+    info,
+    debug,
+  };
+}
+
+/**
+ * Gets recent logs by level
+ */
+export function getRecentLogs(level: 'error' | 'warning' | 'info' | 'debug', limit: number = 10): StoredLog[] {
+  return getLogs({ level, limit });
+}
+
+/**
+ * Deletes old logs (older than specified days)
+ */
+export function deleteOldLogs(daysOld: number): number {
+  const database = getDatabase();
+
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+
+  const stmt = database.prepare(`
+    DELETE FROM logs WHERE created_at < ?
+  `);
+
+  const result = stmt.run(cutoffDate.toISOString());
+  return result.changes;
+}
+
+/**
+ * Deletes all logs from the database (for testing purposes)
+ */
+export function clearAllLogs(): void {
+  const database = getDatabase();
+
+  // Check if logs table exists, if not, create it
+  const tableExists = database.prepare(`
+    SELECT name FROM sqlite_master WHERE type='table' AND name='logs'
+  `).get();
+
+  if (!tableExists) {
+    // Create the logs table if it doesn't exist
+    database.exec(`
+      CREATE TABLE logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        level TEXT NOT NULL CHECK(level IN ('error', 'warning', 'info', 'debug')),
+        message TEXT NOT NULL,
+        source TEXT,
+        context TEXT,
+        stack_trace TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX idx_logs_level ON logs(level);
+      CREATE INDEX idx_logs_created_at ON logs(created_at DESC);
+      CREATE INDEX idx_logs_source ON logs(source);
+    `);
+  } else {
+    // Table exists, clear it
+    database.prepare('DELETE FROM logs').run();
+  }
 }
