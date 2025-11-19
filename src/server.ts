@@ -25,6 +25,7 @@ const wsClients = new Set<WebSocket>();
  */
 function broadcast(message: object): void {
   const data = JSON.stringify(message);
+  console.debug(`Broadcasting to ${wsClients.size} clients:`, (message as any).type);
   wsClients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(data);

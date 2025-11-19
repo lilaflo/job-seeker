@@ -30,6 +30,7 @@ export interface StoredJob {
   description: string | null;
   created_at: string;
   scanned_at: string;
+  email_date: string | null;
 }
 
 export interface StoredSkill {
@@ -354,15 +355,24 @@ export function getJobs(filter?: {
 }): StoredJob[] {
   const database = getDatabase();
 
-  let query = 'SELECT * FROM jobs WHERE 1=1';
+  let query = `
+    SELECT
+      j.id, j.title, j.link, j.email_id,
+      j.salary_min, j.salary_max, j.salary_currency, j.salary_period,
+      j.description, j.created_at, j.scanned_at,
+      e.created_at as email_date
+    FROM jobs j
+    LEFT JOIN emails e ON j.email_id = e.id
+    WHERE 1=1
+  `;
   const params: any[] = [];
 
   if (filter?.emailId !== undefined) {
-    query += ' AND email_id = ?';
+    query += ' AND j.email_id = ?';
     params.push(filter.emailId);
   }
 
-  query += ' ORDER BY created_at DESC';
+  query += ' ORDER BY COALESCE(e.created_at, j.created_at) DESC';
 
   if (filter?.limit) {
     query += ' LIMIT ?';

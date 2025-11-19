@@ -171,6 +171,7 @@
         <input
           type="text"
           x-model="searchTerm"
+          @input="currentPage = 1"
           @keydown.enter="smartSearchEnabled ? performSmartSearch() : null"
           :placeholder="smartSearchEnabled ? 'Semantic search (press Enter)...' : 'Search jobs by title, link, or description...'"
           class="px-4 py-2.5 border border-gray-300 rounded-md w-full max-w-md text-base focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/10"
@@ -224,9 +225,9 @@
                 class="px-4 py-3 text-left bg-gray-50 font-semibold text-gray-600 sticky top-0 cursor-pointer select-none hover:bg-gray-100 border-b border-gray-200"
               >Description <span x-show="sortColumn === 'description'" x-text="sortDirection === 'asc' ? '↑' : '↓'"></span></th>
               <th
-                @click="toggleSort('created_at')"
+                @click="toggleSort('email_date')"
                 class="px-4 py-3 text-left bg-gray-50 font-semibold text-gray-600 sticky top-0 cursor-pointer select-none hover:bg-gray-100 border-b border-gray-200"
-              >Date <span x-show="sortColumn === 'created_at'" x-text="sortDirection === 'asc' ? '↑' : '↓'"></span></th>
+              >Date <span x-show="sortColumn === 'email_date'" x-text="sortDirection === 'asc' ? '↑' : '↓'"></span></th>
             </tr>
           </thead>
           <tbody>
@@ -255,7 +256,7 @@
             </template>
 
             <!-- Job rows -->
-            <template x-for="job in filteredJobs" :key="job.id">
+            <template x-for="job in paginatedJobs" :key="job.id">
               <tr class="cursor-pointer hover:bg-gray-50 border-b border-gray-100" @click="openModal(job)">
                 <td class="px-4 py-3 font-medium text-gray-800 max-w-xs truncate" x-text="job.title || 'Untitled'"></td>
                 <td class="px-4 py-3">
@@ -270,11 +271,43 @@
                     <span class="text-gray-400 italic">No description</span>
                   </template>
                 </td>
-                <td class="px-4 py-3 whitespace-nowrap text-gray-500 text-sm" x-text="formatDate(job.created_at)"></td>
+                <td class="px-4 py-3 whitespace-nowrap text-gray-500 text-sm" x-text="formatDate(job.email_date || job.created_at)"></td>
               </tr>
             </template>
           </tbody>
         </table>
+      </div>
+
+      <!-- Pagination controls -->
+      <div x-show="totalPages > 1" class="flex items-center justify-between px-4 py-3 bg-gray-50 border-t border-gray-200">
+        <div class="text-sm text-gray-500">
+          Showing <span x-text="((currentPage - 1) * pageSize) + 1"></span>-<span x-text="Math.min(currentPage * pageSize, filteredJobs.length)"></span> of <span x-text="filteredJobs.length"></span> jobs
+        </div>
+        <div class="flex items-center gap-2">
+          <button
+            @click="currentPage = 1"
+            :disabled="currentPage === 1"
+            class="px-3 py-1.5 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >First</button>
+          <button
+            @click="currentPage--"
+            :disabled="currentPage === 1"
+            class="px-3 py-1.5 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >Prev</button>
+          <span class="px-3 py-1.5 text-sm">
+            Page <span x-text="currentPage"></span> of <span x-text="totalPages"></span>
+          </span>
+          <button
+            @click="currentPage++"
+            :disabled="currentPage >= totalPages"
+            class="px-3 py-1.5 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >Next</button>
+          <button
+            @click="currentPage = totalPages"
+            :disabled="currentPage >= totalPages"
+            class="px-3 py-1.5 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >Last</button>
+        </div>
       </div>
     </div>
 
@@ -336,7 +369,7 @@
       return {
         jobs: [],
         searchTerm: '',
-        sortColumn: 'created_at',
+        sortColumn: 'email_date',
         sortDirection: 'desc',
         loading: true,
         error: null,
@@ -353,6 +386,8 @@
         ws: null,
         scannedEmails: [],
         scanProgress: null,
+        currentPage: 1,
+        pageSize: 20,
 
         // Computed properties
         get jobsWithSalary() {
@@ -361,6 +396,16 @@
 
         get jobsWithDescription() {
           return this.jobs.filter(j => j.description !== null).length;
+        },
+
+        get totalPages() {
+          return Math.ceil(this.filteredJobs.length / this.pageSize);
+        },
+
+        get paginatedJobs() {
+          const start = (this.currentPage - 1) * this.pageSize;
+          const end = start + this.pageSize;
+          return this.filteredJobs.slice(start, end);
         },
 
         get statusMessage() {
@@ -446,19 +491,21 @@
           const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
           const wsUrl = `${protocol}//${window.location.host}`;
 
+          console.debug('Connecting to WebSocket:', wsUrl);
           this.ws = new WebSocket(wsUrl);
 
           this.ws.onopen = () => {
-            console.debug('WebSocket connected');
+            console.debug('WebSocket connected, readyState:', this.ws.readyState);
           };
 
           this.ws.onmessage = (event) => {
+            console.debug('WebSocket raw message:', event.data);
             const data = JSON.parse(event.data);
             this.handleWebSocketMessage(data);
           };
 
-          this.ws.onclose = () => {
-            console.debug('WebSocket disconnected, reconnecting in 3s...');
+          this.ws.onclose = (event) => {
+            console.debug('WebSocket disconnected, code:', event.code, 'reason:', event.reason);
             setTimeout(() => this.connectWebSocket(), 3000);
           };
 
@@ -512,6 +559,7 @@
             const data = await response.json();
             console.debug('Jobs fetched:', data.jobs?.length || 0);
             this.jobs = data.jobs || [];
+            this.currentPage = 1;
           } catch (err) {
             console.error('Error fetching jobs:', err);
             this.error = 'Failed to load jobs. Make sure the server is running.';
@@ -527,6 +575,7 @@
             this.sortColumn = column;
             this.sortDirection = 'asc';
           }
+          this.currentPage = 1;
         },
 
         openModal(job) {
@@ -655,6 +704,7 @@
 
             const data = await response.json();
             this.jobs = data.jobs || [];
+            this.currentPage = 1;
           } catch (err) {
             console.error('Error during search:', err);
             this.error = 'Search failed. Make sure embeddings are generated.';
