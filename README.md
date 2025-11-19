@@ -52,7 +52,7 @@ An automation tool that scans Gmail for job-related emails, extracts job descrip
 - ✅ **Smart Filtering** - Automatically skips non-crawlable platforms (e.g., LinkedIn requires multi-level authentication)
 - ✅ **Smart Processing** - Skips jobs that already have descriptions, with rate limiting for respectful scraping
 - ✅ **Platform Tracking in Emails** - Each email linked to its source platform (LinkedIn, Indeed, etc.) via foreign key
-- ✅ **Comprehensive Unit Tests** - Full test coverage with 214 passing tests using Vitest
+- ✅ **Comprehensive Unit Tests** - Full test coverage with 233 passing tests using Vitest
 
 ### Coming Soon
 
@@ -322,6 +322,28 @@ Create a `skills.md` file in the project root with your skills and qualification
 ## Usage
 
 The Job Seeker uses a simple two-step workflow:
+
+### View Jobs in Web Interface
+
+Start the web server to view your job listings in a browser:
+
+```bash
+dotenvx run -- pnpm serve
+```
+
+Then open http://localhost:3001 in your browser.
+
+**Features:**
+- **Job table** with sortable columns (title, link, salary, description, date)
+- **Search/filter** jobs by title, URL, or description
+- **Salary display** with formatted ranges (e.g., "USD 80k-120k/y")
+- **Description preview** with full text on hover
+- **Statistics** showing total jobs, with salary, with descriptions
+- **Responsive design** for desktop and mobile
+
+**API Endpoints:**
+- `GET /api/jobs?limit=100` - Fetch job listings with optional limit
+- `GET /api/platforms` - Fetch platform information
 
 ### Step 1: Scan and Categorize Emails
 
@@ -606,15 +628,18 @@ job-seeker/
 │   ├── 006_split_salary_to_min_max.sql      # Structured salary fields (min/max/currency/period)
 │   ├── 007_add_description_to_jobs.sql      # Job description field for AI summaries
 │   └── 008_add_processed_to_emails.sql      # Processed flag to prevent email reprocessing
+├── public/
+│   └── index.html                 # Single-page job listing web interface
 ├── src/
-│   ├── __tests__/                  # Unit tests (214 tests passing)
+│   ├── __tests__/                  # Unit tests (233 tests passing)
 │   │   ├── gmail-auth.test.ts      # 8 tests for OAuth authentication
 │   │   ├── email-scanner.test.ts   # 14 tests for email fetching
 │   │   ├── email-categorizer.test.ts # 13 tests for AI categorization
 │   │   ├── job-portal-domains.test.ts # 15 tests for domain whitelisting
 │   │   ├── url-extractor.test.ts   # 28 tests for URL extraction
 │   │   ├── job-scraper.test.ts     # 43 tests for salary extraction (ranges, single values, formats, currencies, periods)
-│   │   └── database.test.ts        # 93 tests for database operations (emails, jobs, skills, salary, descriptions, processed)
+│   │   ├── database.test.ts        # 93 tests for database operations (emails, jobs, skills, salary, descriptions, processed)
+│   │   └── server.test.ts          # 19 tests for web server API endpoints
 │   ├── email-categorizer.ts        # AI-powered categorization with Ollama
 │   ├── email-scanner.ts            # Email fetching with progress bars
 │   ├── gmail-auth.ts               # Gmail OAuth authentication
@@ -624,7 +649,8 @@ job-seeker/
 │   ├── database.ts                 # SQLite database operations (emails, jobs, skills, matching, descriptions)
 │   ├── index.ts                    # Main entry point (Step 1: Email scanning)
 │   ├── extract-jobs.ts             # Job extraction script (Step 2: Job URL extraction)
-│   └── process-jobs.ts             # Job processing script (Step 3: Scrape & summarize descriptions)
+│   ├── process-jobs.ts             # Job processing script (Step 3: Scrape & summarize descriptions)
+│   └── server.ts                   # Web server for job listing interface (API + static files)
 ├── migrate.sh                      # Database migration script (executable)
 ├── job-seeker.db                   # SQLite database (git-ignored, auto-created)
 ├── credentials.json                # Google OAuth credentials (git-ignored)

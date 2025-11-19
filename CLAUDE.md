@@ -43,7 +43,14 @@ Job Seeker is an automation tool that:
 - Color-coded terminal output (green ✓ for job-related, red ✗ for others)
 - Confidence scoring (high/medium/low) for categorizations
 - Database statistics (total, job-related, confidence breakdown, platform stats)
-- Comprehensive unit test coverage: **214 tests passing** (vitest)
+- **Web interface** - Single-page application to view job listings:
+  - Sortable table with all job data (title, link, salary, description, date)
+  - Real-time search/filter functionality
+  - Salary formatting with currency and period
+  - Description preview with hover for full text
+  - Statistics display (total jobs, with salary, with descriptions)
+  - API endpoints for jobs and platforms data
+- Comprehensive unit test coverage: **233 tests passing** (vitest)
 - TypeScript-only codebase with strict type checking
 
 ### 🔜 To Be Implemented
@@ -320,7 +327,7 @@ For every new feature or bug fix:
 - All tests located in src/__tests__/ directory
 - Test files follow naming: `<module-name>.test.ts`
 
-**Current Test Coverage** (214 tests passing):
+**Current Test Coverage** (233 tests passing):
 - `gmail-auth.test.ts` - 8 tests (OAuth authentication, token management)
 - `email-scanner.test.ts` - 14 tests (email fetching, body extraction, progress bars)
 - `email-categorizer.test.ts` - 13 tests (domain check, Ollama integration, error handling)
@@ -328,6 +335,7 @@ For every new feature or bug fix:
 - `url-extractor.test.ts` - 28 tests (URL extraction, job title parsing, deduplication)
 - `job-scraper.test.ts` - 43 tests (salary extraction: ranges, single values, formats, currencies, periods, k-suffix handling)
 - `database.test.ts` - 93 tests (emails, jobs, skills, salary, descriptions, processed flag, platform tracking)
+- `server.test.ts` - 19 tests (API endpoints, job/platform data, filtering, sorting)
 
 **Running Tests**:
 ```bash

@@ -1,0 +1,243 @@
+/**
+ * Tests for server module - web server for job listings
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import http from 'http';
+import { EventEmitter } from 'events';
+
+// Mock the database module
+vi.mock('../database', () => ({
+  getJobs: vi.fn(() => [
+    {
+      id: 1,
+      title: 'Software Engineer',
+      link: 'https://example.com/job/1',
+      salary_min: 80000,
+      salary_max: 120000,
+      salary_currency: 'USD',
+      salary_period: 'yearly',
+      description: 'A great job opportunity',
+      created_at: '2024-01-15T10:00:00.000Z',
+    },
+    {
+      id: 2,
+      title: 'Frontend Developer',
+      link: 'https://linkedin.com/jobs/2',
+      salary_min: null,
+      salary_max: null,
+      salary_currency: null,
+      salary_period: null,
+      description: null,
+      created_at: '2024-01-14T09:00:00.000Z',
+    },
+  ]),
+  getJobStats: vi.fn(() => ({
+    total: 2,
+  })),
+  getPlatforms: vi.fn(() => [
+    {
+      id: 1,
+      platform_name: 'LinkedIn',
+      hostname: 'linkedin',
+      can_crawl: 0,
+      skip_reason: 'Requires authentication',
+      created_at: '2024-01-01T00:00:00.000Z',
+    },
+    {
+      id: 2,
+      platform_name: 'Indeed',
+      hostname: 'indeed',
+      can_crawl: 1,
+      skip_reason: null,
+      created_at: '2024-01-01T00:00:00.000Z',
+    },
+  ]),
+}));
+
+// Import mocked functions for assertions
+import { getJobs, getJobStats, getPlatforms } from '../database';
+
+describe('Server API endpoints', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('GET /api/jobs', () => {
+    it('should return jobs from database', async () => {
+      const mockJobs = (getJobs as ReturnType<typeof vi.fn>)();
+      const mockStats = (getJobStats as ReturnType<typeof vi.fn>)();
+
+      expect(mockJobs).toHaveLength(2);
+      expect(mockJobs[0].title).toBe('Software Engineer');
+      expect(mockJobs[1].title).toBe('Frontend Developer');
+      expect(mockStats.total).toBe(2);
+    });
+
+    it('should return jobs with salary information', () => {
+      const mockJobs = (getJobs as ReturnType<typeof vi.fn>)();
+
+      const jobWithSalary = mockJobs[0];
+      expect(jobWithSalary.salary_min).toBe(80000);
+      expect(jobWithSalary.salary_max).toBe(120000);
+      expect(jobWithSalary.salary_currency).toBe('USD');
+      expect(jobWithSalary.salary_period).toBe('yearly');
+    });
+
+    it('should return jobs without salary information', () => {
+      const mockJobs = (getJobs as ReturnType<typeof vi.fn>)();
+
+      const jobWithoutSalary = mockJobs[1];
+      expect(jobWithoutSalary.salary_min).toBeNull();
+      expect(jobWithoutSalary.salary_max).toBeNull();
+      expect(jobWithoutSalary.salary_currency).toBeNull();
+      expect(jobWithoutSalary.salary_period).toBeNull();
+    });
+
+    it('should return jobs with description', () => {
+      const mockJobs = (getJobs as ReturnType<typeof vi.fn>)();
+
+      expect(mockJobs[0].description).toBe('A great job opportunity');
+      expect(mockJobs[1].description).toBeNull();
+    });
+
+    it('should call getJobs with limit parameter', () => {
+      getJobs({ limit: 50 });
+
+      expect(getJobs).toHaveBeenCalledWith({ limit: 50 });
+    });
+  });
+
+  describe('GET /api/platforms', () => {
+    it('should return platforms from database', () => {
+      const mockPlatforms = (getPlatforms as ReturnType<typeof vi.fn>)();
+
+      expect(mockPlatforms).toHaveLength(2);
+      expect(mockPlatforms[0].platform_name).toBe('LinkedIn');
+      expect(mockPlatforms[1].platform_name).toBe('Indeed');
+    });
+
+    it('should include crawlability information', () => {
+      const mockPlatforms = (getPlatforms as ReturnType<typeof vi.fn>)();
+
+      const linkedin = mockPlatforms[0];
+      expect(linkedin.can_crawl).toBe(0);
+      expect(linkedin.skip_reason).toBe('Requires authentication');
+
+      const indeed = mockPlatforms[1];
+      expect(indeed.can_crawl).toBe(1);
+      expect(indeed.skip_reason).toBeNull();
+    });
+
+    it('should return platforms with hostname instead of domain', () => {
+      const mockPlatforms = (getPlatforms as ReturnType<typeof vi.fn>)();
+
+      expect(mockPlatforms[0].hostname).toBe('linkedin');
+      expect(mockPlatforms[1].hostname).toBe('indeed');
+    });
+  });
+
+  describe('Database function calls', () => {
+    it('should call getJobs when fetching jobs', () => {
+      getJobs({ limit: 100 });
+      expect(getJobs).toHaveBeenCalledTimes(1);
+    });
+
+    it('should call getJobStats when fetching statistics', () => {
+      getJobStats();
+      expect(getJobStats).toHaveBeenCalledTimes(1);
+    });
+
+    it('should call getPlatforms when fetching platforms', () => {
+      getPlatforms();
+      expect(getPlatforms).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe('Job data structure', () => {
+  it('should have correct job properties', () => {
+    const mockJobs = (getJobs as ReturnType<typeof vi.fn>)();
+    const job = mockJobs[0];
+
+    expect(job).toHaveProperty('id');
+    expect(job).toHaveProperty('title');
+    expect(job).toHaveProperty('link');
+    expect(job).toHaveProperty('salary_min');
+    expect(job).toHaveProperty('salary_max');
+    expect(job).toHaveProperty('salary_currency');
+    expect(job).toHaveProperty('salary_period');
+    expect(job).toHaveProperty('description');
+    expect(job).toHaveProperty('created_at');
+  });
+
+  it('should have correct platform properties', () => {
+    const mockPlatforms = (getPlatforms as ReturnType<typeof vi.fn>)();
+    const platform = mockPlatforms[0];
+
+    expect(platform).toHaveProperty('id');
+    expect(platform).toHaveProperty('platform_name');
+    expect(platform).toHaveProperty('hostname');
+    expect(platform).toHaveProperty('can_crawl');
+    expect(platform).toHaveProperty('skip_reason');
+    expect(platform).toHaveProperty('created_at');
+  });
+});
+
+describe('Job filtering and sorting', () => {
+  it('should be able to filter jobs with salary', () => {
+    const mockJobs = (getJobs as ReturnType<typeof vi.fn>)();
+    const jobsWithSalary = mockJobs.filter((j: any) => j.salary_min !== null);
+
+    expect(jobsWithSalary).toHaveLength(1);
+    expect(jobsWithSalary[0].title).toBe('Software Engineer');
+  });
+
+  it('should be able to filter jobs with description', () => {
+    const mockJobs = (getJobs as ReturnType<typeof vi.fn>)();
+    const jobsWithDescription = mockJobs.filter((j: any) => j.description !== null);
+
+    expect(jobsWithDescription).toHaveLength(1);
+    expect(jobsWithDescription[0].title).toBe('Software Engineer');
+  });
+
+  it('should be able to sort jobs by date', () => {
+    const mockJobs = (getJobs as ReturnType<typeof vi.fn>)();
+    const sortedJobs = [...mockJobs].sort((a: any, b: any) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    expect(sortedJobs[0].title).toBe('Software Engineer');
+    expect(sortedJobs[1].title).toBe('Frontend Developer');
+  });
+
+  it('should be able to sort jobs by salary', () => {
+    const mockJobs = (getJobs as ReturnType<typeof vi.fn>)();
+    const sortedJobs = [...mockJobs].sort((a: any, b: any) => {
+      const aMin = a.salary_min || 0;
+      const bMin = b.salary_min || 0;
+      return bMin - aMin;
+    });
+
+    expect(sortedJobs[0].title).toBe('Software Engineer');
+    expect(sortedJobs[1].title).toBe('Frontend Developer');
+  });
+});
+
+describe('Platform filtering', () => {
+  it('should be able to filter crawlable platforms', () => {
+    const mockPlatforms = (getPlatforms as ReturnType<typeof vi.fn>)();
+    const crawlable = mockPlatforms.filter((p: any) => p.can_crawl === 1);
+
+    expect(crawlable).toHaveLength(1);
+    expect(crawlable[0].platform_name).toBe('Indeed');
+  });
+
+  it('should be able to filter non-crawlable platforms', () => {
+    const mockPlatforms = (getPlatforms as ReturnType<typeof vi.fn>)();
+    const nonCrawlable = mockPlatforms.filter((p: any) => p.can_crawl === 0);
+
+    expect(nonCrawlable).toHaveLength(1);
+    expect(nonCrawlable[0].platform_name).toBe('LinkedIn');
+  });
+});

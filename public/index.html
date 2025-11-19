@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Job Seeker - Job Listings</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background-color: #f5f5f5;
+      color: #333;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px 20px;
+      margin-bottom: 30px;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    header h1 {
+      font-size: 2rem;
+      margin-bottom: 10px;
+    }
+
+    .stats {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .stat-item {
+      background: rgba(255, 255, 255, 0.2);
+      padding: 10px 15px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+
+    .stat-value {
+      font-weight: bold;
+      font-size: 1.2rem;
+    }
+
+    .filters {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    }
+
+    .filters input {
+      padding: 10px 15px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      width: 100%;
+      max-width: 400px;
+      font-size: 1rem;
+    }
+
+    .filters input:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    .table-container {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+      overflow: hidden;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 12px 15px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+    }
+
+    th {
+      background: #f8f9fa;
+      font-weight: 600;
+      color: #555;
+      position: sticky;
+      top: 0;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    th:hover {
+      background: #e9ecef;
+    }
+
+    th.sorted-asc::after {
+      content: ' ↑';
+    }
+
+    th.sorted-desc::after {
+      content: ' ↓';
+    }
+
+    tr:hover {
+      background: #f8f9fa;
+    }
+
+    .job-title {
+      font-weight: 500;
+      color: #333;
+      max-width: 300px;
+    }
+
+    .job-link {
+      color: #667eea;
+      text-decoration: none;
+      word-break: break-all;
+      max-width: 250px;
+      display: inline-block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .job-link:hover {
+      text-decoration: underline;
+    }
+
+    .salary {
+      white-space: nowrap;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 0.85rem;
+    }
+
+    .salary-range {
+      color: #28a745;
+      font-weight: 500;
+    }
+
+    .no-salary {
+      color: #999;
+      font-style: italic;
+    }
+
+    .description-preview {
+      max-width: 300px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #666;
+      font-size: 0.85rem;
+    }
+
+    .has-description {
+      color: #28a745;
+    }
+
+    .no-description {
+      color: #999;
+      font-style: italic;
+    }
+
+    .date {
+      white-space: nowrap;
+      color: #666;
+      font-size: 0.85rem;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+
+    .error {
+      background: #fee;
+      color: #c33;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #666;
+    }
+
+    .empty-state h3 {
+      margin-bottom: 10px;
+      color: #333;
+    }
+
+    footer {
+      text-align: center;
+      padding: 20px;
+      color: #666;
+      font-size: 0.85rem;
+    }
+
+    @media (max-width: 768px) {
+      .table-container {
+        overflow-x: auto;
+      }
+
+      th, td {
+        padding: 8px 10px;
+        font-size: 0.85rem;
+      }
+
+      .job-title, .job-link, .description-preview {
+        max-width: 150px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Job Seeker</h1>
+      <div class="stats" id="stats">
+        <div class="stat-item">
+          <div class="stat-value" id="total-jobs">-</div>
+          <div>Total Jobs</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="with-salary">-</div>
+          <div>With Salary</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="with-description">-</div>
+          <div>With Description</div>
+        </div>
+      </div>
+    </header>
+
+    <div class="filters">
+      <input type="text" id="search" placeholder="Search jobs by title, link, or description..." />
+    </div>
+
+    <div class="table-container">
+      <table id="jobs-table">
+        <thead>
+          <tr>
+            <th data-sort="title">Title</th>
+            <th data-sort="link">Link</th>
+            <th data-sort="salary_min">Salary</th>
+            <th data-sort="description">Description</th>
+            <th data-sort="created_at">Date</th>
+          </tr>
+        </thead>
+        <tbody id="jobs-body">
+          <tr>
+            <td colspan="5" class="loading">Loading jobs...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <footer>
+      Job Seeker - Automated job tracking from Gmail
+    </footer>
+  </div>
+
+  <script>
+    let allJobs = [];
+    let sortColumn = 'created_at';
+    let sortDirection = 'desc';
+
+    // Fetch jobs from API
+    async function fetchJobs() {
+      try {
+        const response = await fetch('/api/jobs?limit=500');
+        if (!response.ok) throw new Error('Failed to fetch jobs');
+
+        const data = await response.json();
+        allJobs = data.jobs || [];
+
+        // Update stats
+        document.getElementById('total-jobs').textContent = data.stats?.total || allJobs.length;
+
+        const withSalary = allJobs.filter(j => j.salary_min !== null).length;
+        const withDesc = allJobs.filter(j => j.description !== null).length;
+
+        document.getElementById('with-salary').textContent = withSalary;
+        document.getElementById('with-description').textContent = withDesc;
+
+        renderJobs(allJobs);
+      } catch (error) {
+        console.error('Error fetching jobs:', error);
+        document.getElementById('jobs-body').innerHTML = `
+          <tr>
+            <td colspan="5" class="error">Failed to load jobs. Make sure the server is running.</td>
+          </tr>
+        `;
+      }
+    }
+
+    // Format salary for display
+    function formatSalary(job) {
+      if (!job.salary_min && !job.salary_max) {
+        return '<span class="no-salary">-</span>';
+      }
+
+      const currency = job.salary_currency || '';
+      const period = job.salary_period ? `/${job.salary_period.charAt(0)}` : '';
+
+      const formatNum = (n) => {
+        if (n >= 1000) {
+          return (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + 'k';
+        }
+        return n.toString();
+      };
+
+      if (job.salary_min === job.salary_max || !job.salary_max) {
+        return `<span class="salary-range">${currency} ${formatNum(job.salary_min)}${period}</span>`;
+      }
+
+      return `<span class="salary-range">${currency} ${formatNum(job.salary_min)}-${formatNum(job.salary_max)}${period}</span>`;
+    }
+
+    // Format date for display
+    function formatDate(dateStr) {
+      if (!dateStr) return '-';
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: date.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined
+      });
+    }
+
+    // Get domain from URL
+    function getDomain(url) {
+      try {
+        const hostname = new URL(url).hostname;
+        return hostname.replace('www.', '');
+      } catch {
+        return url;
+      }
+    }
+
+    // Render jobs table
+    function renderJobs(jobs) {
+      const tbody = document.getElementById('jobs-body');
+
+      if (jobs.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5" class="empty-state">
+              <h3>No jobs found</h3>
+              <p>Try adjusting your search or run the job scanner to fetch new jobs.</p>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = jobs.map(job => `
+        <tr>
+          <td class="job-title">${escapeHtml(job.title || 'Untitled')}</td>
+          <td>
+            <a href="${escapeHtml(job.link)}" target="_blank" class="job-link" title="${escapeHtml(job.link)}">
+              ${escapeHtml(getDomain(job.link))}
+            </a>
+          </td>
+          <td class="salary">${formatSalary(job)}</td>
+          <td class="description-preview">
+            ${job.description
+              ? `<span class="has-description" title="${escapeHtml(job.description.substring(0, 500))}">${escapeHtml(job.description.substring(0, 100))}...</span>`
+              : '<span class="no-description">No description</span>'
+            }
+          </td>
+          <td class="date">${formatDate(job.created_at)}</td>
+        </tr>
+      `).join('');
+    }
+
+    // Escape HTML to prevent XSS
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Sort jobs
+    function sortJobs(jobs, column, direction) {
+      return [...jobs].sort((a, b) => {
+        let aVal = a[column];
+        let bVal = b[column];
+
+        // Handle null values
+        if (aVal === null || aVal === undefined) aVal = '';
+        if (bVal === null || bVal === undefined) bVal = '';
+
+        // Compare
+        if (typeof aVal === 'string') {
+          aVal = aVal.toLowerCase();
+          bVal = bVal.toLowerCase();
+        }
+
+        if (aVal < bVal) return direction === 'asc' ? -1 : 1;
+        if (aVal > bVal) return direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    // Filter jobs by search term
+    function filterJobs(jobs, searchTerm) {
+      if (!searchTerm) return jobs;
+
+      const term = searchTerm.toLowerCase();
+      return jobs.filter(job =>
+        (job.title && job.title.toLowerCase().includes(term)) ||
+        (job.link && job.link.toLowerCase().includes(term)) ||
+        (job.description && job.description.toLowerCase().includes(term))
+      );
+    }
+
+    // Update table headers to show sort state
+    function updateSortHeaders() {
+      document.querySelectorAll('th[data-sort]').forEach(th => {
+        th.classList.remove('sorted-asc', 'sorted-desc');
+        if (th.dataset.sort === sortColumn) {
+          th.classList.add(sortDirection === 'asc' ? 'sorted-asc' : 'sorted-desc');
+        }
+      });
+    }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+      fetchJobs();
+
+      // Search functionality
+      const searchInput = document.getElementById('search');
+      let debounceTimeout;
+
+      searchInput.addEventListener('input', (e) => {
+        clearTimeout(debounceTimeout);
+        debounceTimeout = setTimeout(() => {
+          const filtered = filterJobs(allJobs, e.target.value);
+          const sorted = sortJobs(filtered, sortColumn, sortDirection);
+          renderJobs(sorted);
+        }, 300);
+      });
+
+      // Sort functionality
+      document.querySelectorAll('th[data-sort]').forEach(th => {
+        th.addEventListener('click', () => {
+          const column = th.dataset.sort;
+
+          if (sortColumn === column) {
+            sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+          } else {
+            sortColumn = column;
+            sortDirection = 'asc';
+          }
+
+          updateSortHeaders();
+
+          const searchTerm = document.getElementById('search').value;
+          const filtered = filterJobs(allJobs, searchTerm);
+          const sorted = sortJobs(filtered, sortColumn, sortDirection);
+          renderJobs(sorted);
+        });
+      });
+
+      updateSortHeaders();
+    });
+  </script>
+</body>
+</html>
