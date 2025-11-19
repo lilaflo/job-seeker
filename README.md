@@ -65,6 +65,11 @@ An automation tool that scans Gmail for job-related emails, extracts job descrip
   - **Progress bar**: Visual progress indicator during categorization
   - **Confidence badges**: Color-coded confidence levels (high/medium/low)
   - **Auto-reconnect**: Reconnects automatically if connection drops
+- ✅ **Hot-Reload Development** - Frontend automatically reloads when files change:
+  - **File watching**: Monitors `public/` directory for changes using chokidar
+  - **WebSocket-based**: Uses existing WebSocket connection for instant reload notifications
+  - **Development mode**: Enabled with `NODE_ENV=development` or `pnpm dev`
+  - **Production mode**: Disabled in production for optimal performance
 - ✅ **Comprehensive Unit Tests** - Full test coverage with 262 passing tests using Vitest
 
 ### Coming Soon
@@ -365,23 +370,33 @@ The Job Seeker uses a simple two-step workflow:
 
 ### Start the Application
 
-Start all services (Redis, worker, and web server) in parallel:
+**Development mode** (with hot-reload for frontend):
+
+```bash
+pnpm dev
+```
+
+This runs all services with:
+- **Redis** - Queue backend for embedding generation (blue output)
+- **Worker** - Processes embedding jobs with auto-restart on file changes (yellow output)
+- **Web Server** - API and web interface with hot-reload at http://localhost:3001 (green output)
+- **Hot-reload** - Frontend automatically reloads when `public/index.html` changes
+
+**Production mode:**
 
 ```bash
 pnpm start
 ```
 
-This runs:
-- **Redis** - Queue backend for embedding generation (blue output)
-- **Worker** - Processes embedding jobs from the queue (yellow output)
-- **Web Server** - API and web interface at http://localhost:3001 (green output)
+Same as dev mode but without hot-reload and with `NODE_ENV=production`.
 
 Then open http://localhost:3001 in your browser.
 
 **Individual services** (if needed separately):
 
 ```bash
-pnpm serve        # Just the web server
+pnpm serve:dev    # Web server with hot-reload (development)
+pnpm serve        # Web server without hot-reload (production)
 pnpm worker       # Just the worker
 pnpm redis:start  # Just Redis (detached)
 ```
@@ -748,8 +763,13 @@ job-seeker/
 │   ├── extract-jobs.ts             # Job extraction script (Step 2: Job URL extraction)
 │   ├── process-jobs.ts             # Job processing script (Step 3: Scrape & summarize descriptions)
 │   ├── queue.ts                    # Bull queue module for background job processing
-│   ├── worker.ts                   # Queue worker for embedding generation
-│   └── server.ts                   # Web server for job listing interface (API + static files)
+│   ├── worker.ts                   # Queue worker - registers and coordinates all job processors
+│   ├── server.ts                   # Web server for job listing interface (API + static files)
+│   └── jobs/                       # Bull job processors (modular organization)
+│       ├── embedding.job.ts        # Embedding generation and blacklist checking
+│       ├── email-scan.job.ts       # Email scanning and categorization
+│       ├── job-extraction.job.ts   # Job URL extraction from emails
+│       └── job-processing.job.ts   # Job description scraping and processing
 ├── docker-compose.yml             # Redis container configuration for queue
 ├── migrate.sh                      # Database migration script (executable)
 ├── job-seeker.db                   # SQLite database (git-ignored, auto-created)

@@ -23,8 +23,57 @@ export interface EmbeddingJobResult {
   error?: string;
 }
 
-// Queue instance (lazy initialized)
+export interface EmailScanJobData {
+  query: string;
+  maxResults: number;
+}
+
+export interface EmailScanJobResult {
+  success: boolean;
+  message: string;
+  processed: number;
+  jobRelated: number;
+  skipped: number;
+  embeddingsGenerated: number;
+  jobsBlacklisted: number;
+  error?: string;
+}
+
+export interface JobExtractionJobData {
+  emailId: number;
+  gmailId: string;
+  subject: string;
+  body: string;
+}
+
+export interface JobExtractionJobResult {
+  emailId: number;
+  success: boolean;
+  jobsExtracted: number;
+  error?: string;
+}
+
+export interface JobProcessingJobData {
+  jobId: number;
+  title: string;
+  url: string;
+  emailId: number | null;
+}
+
+export interface JobProcessingJobResult {
+  jobId: number;
+  success: boolean;
+  hasDescription: boolean;
+  hasEmbedding: boolean;
+  blacklisted: boolean;
+  error?: string;
+}
+
+// Queue instances (lazy initialized)
 let embeddingQueue: Bull.Queue<EmbeddingJobData> | null = null;
+let emailScanQueue: Bull.Queue<EmailScanJobData> | null = null;
+let jobExtractionQueue: Bull.Queue<JobExtractionJobData> | null = null;
+let jobProcessingQueue: Bull.Queue<JobProcessingJobData> | null = null;
 
 /**
  * Get or create the embedding queue
@@ -98,6 +147,149 @@ export async function enqueueEmbeddingJobs(
 }
 
 /**
+ * Get or create the email scan queue
+ */
+export function getEmailScanQueue(): Bull.Queue<EmailScanJobData> {
+  if (!emailScanQueue) {
+    emailScanQueue = new Bull<EmailScanJobData>('email-scan', {
+      redis: {
+        host: REDIS_HOST,
+        port: REDIS_PORT,
+      },
+      defaultJobOptions: {
+        removeOnComplete: true,
+        removeOnFail: false,
+        attempts: 1, // No retries for email scans
+        timeout: 300000, // 5 minute timeout
+      },
+    });
+
+    emailScanQueue.on('error', (err) => {
+      console.error('Email scan queue error:', err);
+    });
+
+    emailScanQueue.on('failed', (job, err) => {
+      console.error(`Email scan job ${job.id} failed:`, err.message);
+    });
+  }
+
+  return emailScanQueue;
+}
+
+/**
+ * Add an email scan job to the queue
+ */
+export async function enqueueEmailScan(
+  query: string = 'newer_than:7d',
+  maxResults: number = 20
+): Promise<Bull.Job<EmailScanJobData>> {
+  const queue = getEmailScanQueue();
+
+  return queue.add({
+    query,
+    maxResults,
+  });
+}
+
+/**
+ * Get or create the job extraction queue
+ */
+export function getJobExtractionQueue(): Bull.Queue<JobExtractionJobData> {
+  if (!jobExtractionQueue) {
+    jobExtractionQueue = new Bull<JobExtractionJobData>('job-extraction', {
+      redis: {
+        host: REDIS_HOST,
+        port: REDIS_PORT,
+      },
+      defaultJobOptions: {
+        removeOnComplete: true,
+        removeOnFail: false,
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+        timeout: 60000,
+      },
+    });
+
+    jobExtractionQueue.on('error', (err) => {
+      console.error('Job extraction queue error:', err);
+    });
+  }
+
+  return jobExtractionQueue;
+}
+
+/**
+ * Add a job extraction job to the queue
+ */
+export async function enqueueJobExtraction(
+  emailId: number,
+  gmailId: string,
+  subject: string,
+  body: string
+): Promise<Bull.Job<JobExtractionJobData>> {
+  const queue = getJobExtractionQueue();
+
+  return queue.add({
+    emailId,
+    gmailId,
+    subject,
+    body,
+  });
+}
+
+/**
+ * Get or create the job processing queue
+ */
+export function getJobProcessingQueue(): Bull.Queue<JobProcessingJobData> {
+  if (!jobProcessingQueue) {
+    jobProcessingQueue = new Bull<JobProcessingJobData>('job-processing', {
+      redis: {
+        host: REDIS_HOST,
+        port: REDIS_PORT,
+      },
+      defaultJobOptions: {
+        removeOnComplete: true,
+        removeOnFail: false,
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 5000,
+        },
+        timeout: 120000, // 2 minute timeout for web scraping
+      },
+    });
+
+    jobProcessingQueue.on('error', (err) => {
+      console.error('Job processing queue error:', err);
+    });
+  }
+
+  return jobProcessingQueue;
+}
+
+/**
+ * Add a job processing job to the queue
+ */
+export async function enqueueJobProcessing(
+  jobId: number,
+  title: string,
+  url: string,
+  emailId: number | null
+): Promise<Bull.Job<JobProcessingJobData>> {
+  const queue = getJobProcessingQueue();
+
+  return queue.add({
+    jobId,
+    title,
+    url,
+    emailId,
+  });
+}
+
+/**
  * Get queue statistics
  */
 export async function getQueueStats(): Promise<{
@@ -127,12 +319,50 @@ export async function getQueueStats(): Promise<{
 }
 
 /**
+ * Get email scan queue statistics
+ */
+export async function getEmailScanQueueStats(): Promise<{
+  waiting: number;
+  active: number;
+  completed: number;
+  failed: number;
+}> {
+  const queue = getEmailScanQueue();
+
+  const [waiting, active, completed, failed] = await Promise.all([
+    queue.getWaitingCount(),
+    queue.getActiveCount(),
+    queue.getCompletedCount(),
+    queue.getFailedCount(),
+  ]);
+
+  return {
+    waiting,
+    active,
+    completed,
+    failed,
+  };
+}
+
+/**
  * Close all queue connections
  */
 export async function closeQueues(): Promise<void> {
   if (embeddingQueue) {
     await embeddingQueue.close();
     embeddingQueue = null;
+  }
+  if (emailScanQueue) {
+    await emailScanQueue.close();
+    emailScanQueue = null;
+  }
+  if (jobExtractionQueue) {
+    await jobExtractionQueue.close();
+    jobExtractionQueue = null;
+  }
+  if (jobProcessingQueue) {
+    await jobProcessingQueue.close();
+    jobProcessingQueue = null;
   }
 }
 

@@ -3,9 +3,9 @@
  * Uses sqlite-vec for vector similarity search in SQLite
  */
 
-import { Ollama } from 'ollama';
 import { getDatabase, getJobs, markJobBlacklisted, resetAllJobsBlacklisted, getBlacklistedJobCount } from './database';
 import * as sqliteVec from 'sqlite-vec';
+import { getOllamaClient, isModelAvailable } from './ollama-client';
 
 // Embedding model configuration
 const EMBEDDING_MODEL = 'nomic-embed-text';
@@ -42,37 +42,11 @@ async function processQueue<T, R>(
   return results;
 }
 
-// Ollama client (lazy initialized)
-let ollamaClient: Ollama | null = null;
-
-function getOllamaClient(): Ollama {
-  if (!ollamaClient) {
-    const host = process.env.OLLAMA_HOST || 'http://localhost:11434';
-    ollamaClient = new Ollama({ host });
-  }
-  return ollamaClient;
-}
-
-/**
- * Reset Ollama client (for testing)
- */
-export function resetOllamaClient(): void {
-  ollamaClient = null;
-}
-
 /**
  * Check if the embedding model is available in Ollama
  */
 export async function checkEmbeddingModelAvailable(): Promise<boolean> {
-  try {
-    const client = getOllamaClient();
-    const response = await client.list();
-    const modelNames = response.models.map(m => m.name.split(':')[0]);
-    return modelNames.includes(EMBEDDING_MODEL);
-  } catch (error) {
-    console.debug(`Failed to check embedding model: ${error instanceof Error ? error.message : String(error)}`);
-    return false;
-  }
+  return isModelAvailable(EMBEDDING_MODEL);
 }
 
 /**

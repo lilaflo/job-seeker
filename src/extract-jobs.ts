@@ -32,22 +32,11 @@ import {
   checkRedisConnection,
   closeQueues,
 } from "./queue";
-import { Ollama } from "ollama";
+import { getOllamaClient } from "./ollama-client";
 import cliProgress from "cli-progress";
 
 // Configuration: Set to false to skip description fetching
 const FETCH_DESCRIPTIONS = process.env.FETCH_DESCRIPTIONS !== "false";
-
-// Ollama client singleton
-let ollamaClient: Ollama | null = null;
-
-function getOllamaClient(): Ollama {
-  if (!ollamaClient) {
-    const host = process.env.OLLAMA_HOST || "http://localhost:11434";
-    ollamaClient = new Ollama({ host });
-  }
-  return ollamaClient;
-}
 
 /**
  * Summarizes a job description using Ollama LLM
