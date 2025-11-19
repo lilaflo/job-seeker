@@ -1,6 +1,11 @@
-import { Ollama } from 'ollama';
 import type { EmailMessage } from './email-scanner';
 import { isFromJobPortal } from './job-portal-domains';
+import {
+  getOllamaClient,
+  resetOllamaClient as resetClient,
+  checkOllamaAvailability as checkAvailability,
+  getBestModel as getBest,
+} from './ollama-client';
 
 // Re-export EmailMessage for external use
 export type { EmailMessage };
@@ -17,81 +22,25 @@ export interface CategorizedEmail extends EmailMessage {
   body?: string;
 }
 
-// Default Ollama configuration
-const DEFAULT_MODEL = 'llama3.2:latest';
-const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
-
-let ollamaClient: Ollama | null = null;
-
-/**
- * Gets or creates the Ollama client instance
- */
-function getOllamaClient(): Ollama {
-  if (!ollamaClient) {
-    ollamaClient = new Ollama({ host: OLLAMA_HOST });
-  }
-  return ollamaClient;
-}
-
 /**
  * Resets the Ollama client instance (for testing)
  */
 export function resetOllamaClient(): void {
-  ollamaClient = null;
+  resetClient();
 }
 
 /**
  * Checks if Ollama is available and running
  */
 export async function checkOllamaAvailability(): Promise<boolean> {
-  try {
-    const ollama = getOllamaClient();
-    const models = await ollama.list();
-    return models.models.length > 0;
-  } catch (error) {
-    return false;
-  }
+  return checkAvailability();
 }
 
 /**
  * Gets the best available model for email categorization
  */
 export async function getBestModel(): Promise<string> {
-  try {
-    const ollama = getOllamaClient();
-    const models = await ollama.list();
-
-    // Preferred models in order of preference
-    const preferredModels = [
-      'llama3.2:latest',
-      'llama3.2',
-      'llama3.1:latest',
-      'llama3.1',
-      'llama3:latest',
-      'llama3',
-      'mistral:latest',
-      'mistral',
-      'phi3:latest',
-      'phi3',
-    ];
-
-    for (const preferred of preferredModels) {
-      const found = models.models.find(m => m.name === preferred || m.name.startsWith(preferred.split(':')[0]));
-      if (found) {
-        return found.name;
-      }
-    }
-
-    // Fallback to first available model
-    if (models.models.length > 0) {
-      const fallback = models.models[0].name;
-      return fallback;
-    }
-
-    throw new Error('No Ollama models available');
-  } catch (error) {
-    return DEFAULT_MODEL;
-  }
+  return getBest();
 }
 
 

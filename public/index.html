@@ -128,20 +128,6 @@
           <span x-show="scanning">Scanning...</span>
         </button>
         <button
-          class="px-5 py-2.5 rounded-md font-medium text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 inline-flex items-center gap-2 transition-all hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-60 disabled:cursor-not-allowed"
-          @click="generateEmbeddings()"
-          :disabled="generatingEmbeddings"
-        >
-          <template x-if="generatingEmbeddings">
-            <div
-              class="w-4 h-4 border-2 border-gray-400 border-t-gray-700 rounded-full animate-spin-fast"
-            ></div>
-          </template>
-          <span
-            x-text="generatingEmbeddings ? 'Generating...' : 'Generate Embeddings'"
-          ></span>
-        </button>
-        <button
           class="px-5 py-2.5 rounded-md font-medium text-sm bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 inline-flex items-center gap-2 transition-all hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-60 disabled:cursor-not-allowed"
           @click="resetDatabase()"
           :disabled="resetting"
@@ -161,7 +147,7 @@
         </button>
         <span
           class="text-sm"
-          :class="{ 'text-green-600 dark:text-green-400': scanResult?.success || embeddingResult?.success || resetResult?.success, 'text-red-600 dark:text-red-400': (scanResult && !scanResult.success) || (embeddingResult && !embeddingResult.success) || (resetResult && !resetResult.success), 'text-gray-500 dark:text-gray-400': !scanResult && !embeddingResult && !resetResult }"
+          :class="{ 'text-green-600 dark:text-green-400': scanResult?.success || resetResult?.success, 'text-red-600 dark:text-red-400': (scanResult && !scanResult.success) || (resetResult && !resetResult.success), 'text-gray-500 dark:text-gray-400': !scanResult && !resetResult }"
           x-text="statusMessage"
         ></span>
       </div>
@@ -666,8 +652,6 @@
           selectedJob: null,
           scanning: false,
           scanResult: null,
-          generatingEmbeddings: false,
-          embeddingResult: null,
           smartSearchEnabled: false,
           searching: false,
           resetting: false,
@@ -712,14 +696,6 @@
                 return this.resetResult.message;
               }
               return this.resetResult.error || "Reset failed";
-            }
-            if (this.embeddingResult) {
-              if (this.embeddingResult.success) {
-                return this.embeddingResult.message;
-              }
-              return (
-                this.embeddingResult.error || "Embedding generation failed"
-              );
             }
             if (this.scanResult) {
               if (this.scanResult.success) {
@@ -879,6 +855,15 @@
                 };
                 this.scanProgress = null;
                 break;
+
+              case "reload":
+                console.debug("Hot-reload triggered:", data.file);
+                // Reload the page after a short delay to allow file to be fully written
+                setTimeout(() => {
+                  console.debug("Reloading page...");
+                  window.location.reload();
+                }, 100);
+                break;
             }
           },
 
@@ -933,7 +918,6 @@
             try {
               this.scanning = true;
               this.scanResult = null;
-              this.embeddingResult = null;
               this.resetResult = null;
               this.scannedEmails = [];
               this.scanProgress = null;
@@ -960,31 +944,6 @@
             }
           },
 
-          async generateEmbeddings() {
-            if (this.generatingEmbeddings) return;
-
-            try {
-              this.generatingEmbeddings = true;
-              this.embeddingResult = null;
-              this.scanResult = null;
-
-              const response = await fetch("/api/embeddings/generate", {
-                method: "POST",
-              });
-
-              const result = await response.json();
-              this.embeddingResult = result;
-            } catch (err) {
-              console.error("Error generating embeddings:", err);
-              this.embeddingResult = {
-                success: false,
-                error: "Failed to generate embeddings. Is Ollama running?",
-              };
-            } finally {
-              this.generatingEmbeddings = false;
-            }
-          },
-
           async resetDatabase() {
             if (this.resetting) return;
 
@@ -1000,7 +959,6 @@
               this.resetting = true;
               this.resetResult = null;
               this.scanResult = null;
-              this.embeddingResult = null;
 
               const response = await fetch("/api/reset", {
                 method: "POST",

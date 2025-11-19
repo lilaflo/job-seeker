@@ -4,25 +4,12 @@
  */
 
 import * as cheerio from 'cheerio';
-import { Ollama } from 'ollama';
+import { getOllamaClient } from './ollama-client';
 
 /**
  * User agent to use for web requests (appears as a legitimate browser)
  */
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
-/**
- * Ollama client singleton for salary extraction
- */
-let ollamaClient: Ollama | null = null;
-
-function getOllamaClient(): Ollama {
-  if (!ollamaClient) {
-    const host = process.env.OLLAMA_HOST || 'http://localhost:11434';
-    ollamaClient = new Ollama({ host });
-  }
-  return ollamaClient;
-}
 
 /**
  * Fetches HTML content from a URL

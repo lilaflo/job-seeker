@@ -5,16 +5,23 @@
  */
 
 import Bull from 'bull';
-import { getEmbeddingQueue, type EmbeddingJobData, type EmbeddingJobResult } from './queue';
 import {
-  generateAndSaveJobEmbedding,
-  getBlacklistKeywords,
-  bufferToEmbedding,
-  cosineSimilarity,
-  getJobEmbedding,
-  checkEmbeddingModelAvailable,
-} from './embeddings';
-import { markJobBlacklisted, closeDatabase } from './database';
+  getEmbeddingQueue,
+  getEmailScanQueue,
+  getJobExtractionQueue,
+  getJobProcessingQueue,
+  type EmbeddingJobData,
+  type EmailScanJobData,
+  type JobExtractionJobData,
+  type JobProcessingJobData,
+} from './queue';
+import { checkEmbeddingModelAvailable } from './embeddings';
+import { closeDatabase } from './database';
+import { checkOllamaAvailability, getBestModel } from './email-categorizer';
+import { processEmbeddingJob } from './jobs/embedding.job';
+import { processEmailScanJob } from './jobs/email-scan.job';
+import { processJobExtractionJob } from './jobs/job-extraction.job';
+import { processJobProcessingJob, setOllamaModel } from './jobs/job-processing.job';
 
 // Configuration
 const CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || '3', 10);
@@ -42,14 +49,32 @@ async function main() {
   await queue.isReady();
   console.log('Connected to Redis');
 
-  // Pre-fetch blacklist embeddings for fast comparison
-  const blacklistKeywords = getBlacklistKeywords();
-  const blacklistEmbeddings = blacklistKeywords
-    .filter(k => k.embedding)
-    .map(k => bufferToEmbedding(k.embedding!));
-  const minSimilarity = 0.7;
+  // Get email scan queue
+  const emailScanQueue = getEmailScanQueue();
+  await emailScanQueue.isReady();
+  console.log('Email scan queue ready');
 
-  console.log(`Loaded ${blacklistEmbeddings.length} blacklist embeddings`);
+  // Get job extraction queue
+  const jobExtractionQueue = getJobExtractionQueue();
+  await jobExtractionQueue.isReady();
+  console.log('Job extraction queue ready');
+
+  // Get job processing queue
+  const jobProcessingQueue = getJobProcessingQueue();
+  await jobProcessingQueue.isReady();
+  console.log('Job processing queue ready');
+
+  // Get Ollama model for summarization
+  const ollamaAvailable = await checkOllamaAvailability();
+  if (ollamaAvailable) {
+    const ollamaModel = await getBestModel();
+    console.log(`Using Ollama model: ${ollamaModel}`);
+    setOllamaModel(ollamaModel);
+  } else {
+    console.warn('Ollama not available - job descriptions will not be summarized');
+    setOllamaModel(null);
+  }
+
   console.log('Waiting for jobs...\n');
 
   // Track statistics
@@ -57,58 +82,29 @@ async function main() {
   let succeeded = 0;
   let failed = 0;
   let blacklisted = 0;
+  let emailScansProcessed = 0;
+  let jobsExtracted = 0;
+  let jobsProcessed = 0;
 
-  // Process jobs
-  queue.process(CONCURRENCY, async (job: Bull.Job<EmbeddingJobData>): Promise<EmbeddingJobResult> => {
-    const { jobId, title, description } = job.data;
+  // Process embedding jobs
+  queue.process(CONCURRENCY, async (job: Bull.Job<EmbeddingJobData>) => {
+    const result = await processEmbeddingJob(job);
 
-    console.debug(`Processing job ${jobId}: ${title.substring(0, 50)}...`);
-
-    try {
-      // Generate embedding
-      await generateAndSaveJobEmbedding(jobId, title, description);
-
-      // Check against blacklist
-      let isBlacklisted = false;
-      if (blacklistEmbeddings.length > 0) {
-        const jobEmbedding = getJobEmbedding(jobId);
-
-        if (jobEmbedding) {
-          for (const blacklistEmb of blacklistEmbeddings) {
-            const similarity = cosineSimilarity(jobEmbedding, blacklistEmb);
-            if (similarity >= minSimilarity) {
-              markJobBlacklisted(jobId, true);
-              isBlacklisted = true;
-              blacklisted++;
-              break;
-            }
-          }
-        }
-      }
-
-      processed++;
+    processed++;
+    if (result.success) {
       succeeded++;
-
-      console.debug(`  ✓ Job ${jobId} completed${isBlacklisted ? ' (blacklisted)' : ''}`);
-
-      return {
-        jobId,
-        success: true,
-        blacklisted: isBlacklisted,
-      };
-    } catch (error) {
-      processed++;
+      if (result.blacklisted) {
+        blacklisted++;
+      }
+    } else {
       failed++;
-
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`  ✗ Job ${jobId} failed: ${errorMessage}`);
-
-      throw error; // Re-throw to trigger Bull's retry mechanism
     }
+
+    return result;
   });
 
   // Handle queue events
-  queue.on('completed', (job, result: EmbeddingJobResult) => {
+  queue.on('completed', (job, result) => {
     console.debug(`Job ${job.id} completed: ${result.success ? 'success' : 'failed'}`);
   });
 
@@ -124,18 +120,69 @@ async function main() {
     console.debug(`Job ${job.id} progress: ${progress}%`);
   });
 
+  // Process email scan jobs (only one at a time)
+  emailScanQueue.process(1, async (job: Bull.Job<EmailScanJobData>) => {
+    const result = await processEmailScanJob(job);
+
+    if (result.success) {
+      emailScansProcessed++;
+    }
+
+    return result;
+  });
+
+  // Handle email scan queue events
+  emailScanQueue.on('completed', (job, result) => {
+    console.debug(`Email scan job ${job.id} completed: ${result.success ? 'success' : 'failed'}`);
+  });
+
+  emailScanQueue.on('failed', (job, err) => {
+    console.error(`Email scan job ${job.id} failed:`, err.message);
+  });
+
+  // Process job extraction jobs
+  jobExtractionQueue.process(CONCURRENCY, async (job: Bull.Job<JobExtractionJobData>) => {
+    const result = await processJobExtractionJob(job);
+
+    if (result.success) {
+      jobsExtracted += result.jobsExtracted;
+    }
+
+    return result;
+  });
+
+  // Process job processing jobs (fetch description, generate embedding)
+  jobProcessingQueue.process(CONCURRENCY, async (job: Bull.Job<JobProcessingJobData>) => {
+    const result = await processJobProcessingJob(job);
+
+    if (result.success) {
+      jobsProcessed++;
+      if (result.blacklisted) {
+        blacklisted++;
+      }
+    }
+
+    return result;
+  });
+
   // Graceful shutdown
   const shutdown = async () => {
     console.log('\nShutting down worker...');
 
     await queue.close();
+    await emailScanQueue.close();
+    await jobExtractionQueue.close();
+    await jobProcessingQueue.close();
     closeDatabase();
 
     console.log('\n--- Worker Statistics ---');
-    console.log(`Total processed: ${processed}`);
-    console.log(`Succeeded: ${succeeded}`);
-    console.log(`Failed: ${failed}`);
-    console.log(`Blacklisted: ${blacklisted}`);
+    console.log(`Email scans processed: ${emailScansProcessed}`);
+    console.log(`Jobs extracted: ${jobsExtracted}`);
+    console.log(`Jobs processed: ${jobsProcessed}`);
+    console.log(`Embeddings generated: ${processed}`);
+    console.log(`Embeddings succeeded: ${succeeded}`);
+    console.log(`Embeddings failed: ${failed}`);
+    console.log(`Jobs blacklisted: ${blacklisted}`);
 
     process.exit(0);
   };

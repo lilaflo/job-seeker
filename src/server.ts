@@ -10,6 +10,7 @@ import fs from "fs";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { WebSocketServer, WebSocket } from "ws";
+import chokidar from "chokidar";
 import {
   getJobs,
   getJobStats,
@@ -17,11 +18,17 @@ import {
   deleteJob,
   closeDatabase,
 } from "./database";
+import {
+  enqueueEmailScan,
+  getEmailScanQueueStats,
+  checkRedisConnection,
+} from "./queue";
 
 const execAsync = promisify(exec);
 
 // Track if a scan is currently running
 let scanInProgress = false;
+let currentScanJobId: string | null = null;
 
 // Connected WebSocket clients
 const wsClients = new Set<WebSocket>();
@@ -596,6 +603,33 @@ wss.on("connection", (ws) => {
     wsClients.delete(ws);
   });
 });
+
+// Enable hot-reloading in development mode
+const isDevelopment = process.env.NODE_ENV !== "production";
+if (isDevelopment) {
+  console.debug("🔥 Hot-reload enabled - watching public/ directory");
+
+  const watcher = chokidar.watch(publicDir, {
+    ignored: /(^|[\/\\])\../, // ignore dotfiles
+    persistent: true,
+    ignoreInitial: true,
+  });
+
+  watcher.on("change", (filePath) => {
+    const relativePath = path.relative(publicDir, filePath);
+    console.debug(`📝 File changed: ${relativePath} - broadcasting reload`);
+    broadcast({ type: "reload", file: relativePath });
+  });
+
+  watcher.on("error", (error) => {
+    console.error("File watcher error:", error);
+  });
+
+  // Clean up watcher on shutdown
+  process.on("SIGINT", () => {
+    watcher.close();
+  });
+}
 
 server.listen(PORT, () => {
   console.log(`\n🚀 Job Seeker Web Server running at http://localhost:${PORT}`);
