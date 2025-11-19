@@ -402,6 +402,29 @@ export function getJobs(filter?: {
 }
 
 /**
+ * Gets a single job by ID
+ */
+export function getJobById(jobId: number): StoredJob | null {
+  const database = getDatabase();
+
+  const query = `
+    SELECT
+      j.id, j.title, j.link, j.email_id,
+      j.salary_min, j.salary_max, j.salary_currency, j.salary_period,
+      j.description, j.created_at, j.scanned_at,
+      e.created_at as email_date,
+      j.blacklisted
+    FROM jobs j
+    LEFT JOIN emails e ON j.email_id = e.id
+    WHERE j.id = ?
+  `;
+
+  const stmt = database.prepare(query);
+  const result = stmt.get(jobId) as StoredJob | undefined;
+  return result || null;
+}
+
+/**
  * Mark a job as blacklisted or not
  */
 export function markJobBlacklisted(jobId: number, blacklisted: boolean): void {

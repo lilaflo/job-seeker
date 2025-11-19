@@ -14,6 +14,7 @@ import {
   isJobScanned,
   getScannedJobLinks,
   getJobs,
+  getJobById,
   getJobStats,
   clearAllJobs,
   deleteJob,
@@ -788,6 +789,55 @@ describe('database', () => {
     it('should return all jobs without filter', () => {
       const jobs = getJobs();
       expect(jobs).toHaveLength(4);
+    });
+  });
+
+  describe('getJobById', () => {
+    it('should return a job by ID', () => {
+      saveJob('Test Job', 'https://example.com/job/1', undefined, {
+        min: 80000,
+        max: 120000,
+        currency: 'USD',
+        period: 'yearly',
+      }, 'Job description here');
+
+      const jobs = getJobs();
+      const jobId = jobs[0].id;
+
+      const job = getJobById(jobId);
+      expect(job).not.toBeNull();
+      expect(job?.id).toBe(jobId);
+      expect(job?.title).toBe('Test Job');
+      expect(job?.link).toBe('https://example.com/job/1');
+      expect(job?.salary_min).toBe(80000);
+      expect(job?.salary_max).toBe(120000);
+      expect(job?.salary_currency).toBe('USD');
+      expect(job?.salary_period).toBe('yearly');
+      expect(job?.description).toBe('Job description here');
+    });
+
+    it('should return null for non-existent job ID', () => {
+      const job = getJobById(99999);
+      expect(job).toBeNull();
+    });
+
+    it('should include email_date when job has email association', () => {
+      const email = createMockEmail('e1', 'Test Email');
+      const category = createMockCategory('high', true);
+      saveEmail(email, category);
+
+      const emails = getEmails();
+      const emailId = emails[0].id;
+
+      saveJob('Job with Email', 'https://example.com/job/1', emailId);
+
+      const jobs = getJobs();
+      const jobId = jobs[0].id;
+
+      const job = getJobById(jobId);
+      expect(job).not.toBeNull();
+      expect(job?.email_id).toBe(emailId);
+      expect(job?.email_date).toBeDefined();
     });
   });
 
