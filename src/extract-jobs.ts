@@ -34,6 +34,7 @@ import {
 } from "./queue";
 import { getOllamaClient } from "./ollama-client";
 import cliProgress from "cli-progress";
+import { logger } from "./logger";
 
 // Configuration: Set to false to skip description fetching
 const FETCH_DESCRIPTIONS = process.env.FETCH_DESCRIPTIONS !== "false";
@@ -204,6 +205,7 @@ async function main() {
       const ollamaAvailable = await checkOllamaAvailability();
 
       if (!ollamaAvailable) {
+        logger.error('Ollama is not available. Disabling description fetching. To enable: Start Ollama with "ollama serve"', { source: 'extract-jobs' });
         console.error(
           "✗ Ollama is not available. Disabling description fetching."
         );
@@ -518,6 +520,7 @@ async function main() {
 
         console.log("\nTo process the queue, run: pnpm worker");
       } else {
+        logger.error('Redis is not available. Cannot queue embedding jobs. Start Redis with: pnpm redis:start', { source: 'extract-jobs', context: { pendingJobs: jobsToEmbed.length } });
         console.error("✗ Redis is not available. Cannot queue embedding jobs.");
         console.error("  Start Redis with: pnpm redis:start");
         console.log(`  ${jobsToEmbed.length} jobs need embeddings but were not queued.`);
@@ -537,6 +540,7 @@ async function main() {
     await closeQueues();
     closeDatabase();
   } catch (error) {
+    logger.errorFromException(error, { source: 'extract-jobs' });
     console.error(
       "\n✗ Error:",
       error instanceof Error ? error.message : String(error)

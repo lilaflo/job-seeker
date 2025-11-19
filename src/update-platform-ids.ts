@@ -7,6 +7,7 @@
 import { getPlatformIdFromEmail } from './database';
 import Database from 'better-sqlite3';
 import path from 'path';
+import { logger } from './logger';
 
 async function updatePlatformIds() {
   console.log('Starting platform_id update for existing emails...\n');
@@ -65,4 +66,7 @@ async function updatePlatformIds() {
 }
 
 // Run the script
-updatePlatformIds().catch(console.error);
+updatePlatformIds().catch((error) => {
+  logger.errorFromException(error, { source: 'update-platform-ids' });
+  console.error(error);
+});

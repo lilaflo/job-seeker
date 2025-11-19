@@ -8,6 +8,7 @@ import { google } from 'googleapis';
 import { authorize } from './gmail-auth';
 import Database from 'better-sqlite3';
 import path from 'path';
+import { logger } from './logger';
 
 async function populateFromAddresses() {
   console.log('Starting from_address population for existing emails...\n');
@@ -64,6 +65,7 @@ async function populateFromAddresses() {
         console.log(`✗ Email not found in Gmail: ${email.gmail_id} (may have been deleted)`);
         notFound++;
       } else {
+        logger.error(`Error processing email ${email.gmail_id}: ${error.message}`, { source: 'populate-from-addresses', context: { gmailId: email.gmail_id, emailId: email.id } });
         console.error(`✗ Error processing email ${email.gmail_id}:`, error.message);
         errors++;
       }
@@ -79,4 +81,7 @@ async function populateFromAddresses() {
 }
 
 // Run the script
-populateFromAddresses().catch(console.error);
+populateFromAddresses().catch((error) => {
+  logger.errorFromException(error, { source: 'populate-from-addresses' });
+  console.error(error);
+});

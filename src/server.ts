@@ -21,6 +21,7 @@ import {
 import {
   checkRedisConnection,
 } from "./queue";
+import { logger } from "./logger";
 
 const execAsync = promisify(exec);
 
@@ -102,6 +103,7 @@ function handleJobsApi(
     });
     res.end(JSON.stringify({ jobs, stats }));
   } catch (error) {
+    logger.errorFromException(error, { source: 'server', context: { endpoint: '/api/jobs' } });
     console.error("Jobs API error:", error);
     res.writeHead(500, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Failed to fetch jobs" }));
@@ -121,6 +123,7 @@ function handlePlatformsApi(res: http.ServerResponse): void {
     });
     res.end(JSON.stringify({ platforms }));
   } catch (error) {
+    logger.errorFromException(error, { source: 'server', context: { endpoint: '/api/platforms' } });
     console.error("Platforms API error:", error);
     res.writeHead(500, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Failed to fetch platforms" }));
@@ -148,6 +151,7 @@ function handleDeleteJobApi(jobId: number, res: http.ServerResponse): void {
       res.end(JSON.stringify({ error: "Job not found" }));
     }
   } catch (error) {
+    logger.errorFromException(error, { source: 'server', context: { endpoint: '/api/jobs/delete', jobId } });
     console.error("Delete job API error:", error);
     res.writeHead(500, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Failed to delete job" }));
@@ -205,6 +209,7 @@ async function handleScanApi(res: http.ServerResponse): Promise<void> {
     });
     res.end(JSON.stringify(result));
   } catch (error) {
+    logger.errorFromException(error, { source: 'server', context: { endpoint: '/api/scan' } });
     console.error("Scan error:", error);
 
     // Broadcast error
@@ -278,6 +283,7 @@ async function handleSearchApi(
     });
     res.end(JSON.stringify({ jobs, stats }));
   } catch (error) {
+    logger.errorFromException(error, { source: 'server', context: { endpoint: '/api/search' } });
     console.error("Search error:", error);
     res.writeHead(500, {
       "Content-Type": "application/json",
@@ -323,6 +329,7 @@ async function handleResetDatabaseApi(res: http.ServerResponse): Promise<void> {
       })
     );
   } catch (error) {
+    logger.errorFromException(error, { source: 'server', context: { endpoint: '/api/reset-database' } });
     console.error("Reset database error:", error);
     res.writeHead(500, {
       "Content-Type": "application/json",
@@ -388,6 +395,7 @@ async function handleGenerateEmbeddingsApi(
       })
     );
   } catch (error) {
+    logger.errorFromException(error, { source: 'server', context: { endpoint: '/api/generate-embeddings' } });
     console.error("Embedding generation error:", error);
     res.writeHead(500, {
       "Content-Type": "application/json",
@@ -418,6 +426,7 @@ async function handleGetBlacklistApi(res: http.ServerResponse): Promise<void> {
     });
     res.end(JSON.stringify({ text }));
   } catch (error) {
+    logger.errorFromException(error, { source: 'server', context: { endpoint: '/api/blacklist' } });
     console.error("Get blacklist error:", error);
     res.writeHead(500, {
       "Content-Type": "application/json",
@@ -473,6 +482,7 @@ async function handleUpdateBlacklistApi(
       })
     );
   } catch (error) {
+    logger.errorFromException(error, { source: 'server', context: { endpoint: '/api/blacklist (PUT)' } });
     console.error("Update blacklist error:", error);
     res.writeHead(500, {
       "Content-Type": "application/json",
@@ -597,6 +607,7 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("error", (error) => {
+    logger.errorFromException(error, { source: 'server', context: { component: 'websocket' } });
     console.error("WebSocket error:", error);
     wsClients.delete(ws);
   });
@@ -620,6 +631,7 @@ if (isDevelopment) {
   });
 
   watcher.on("error", (error) => {
+    logger.errorFromException(error, { source: 'server', context: { component: 'file-watcher' } });
     console.error("File watcher error:", error);
   });
 

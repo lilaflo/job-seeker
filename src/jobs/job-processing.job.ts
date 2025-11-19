@@ -21,6 +21,7 @@ import {
   canCrawlUrl,
 } from '../database';
 import { scrapeJobPage } from '../job-scraper';
+import { logger } from '../logger';
 
 // Pre-fetch blacklist embeddings for fast comparison
 const blacklistKeywords = getBlacklistKeywords();
@@ -93,6 +94,7 @@ export async function processJobProcessingJob(
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.errorFromException(error, { source: 'job-processing.job', context: { jobId, title, url } });
     console.error(`  ✗ Job processing failed for job ${jobId}: ${errorMessage}`);
 
     return {

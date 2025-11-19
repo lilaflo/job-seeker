@@ -19,6 +19,7 @@ import { checkOllamaAvailability, getBestModel } from './email-categorizer';
 import { processEmbeddingJob } from './jobs/embedding.job';
 import { processJobExtractionJob } from './jobs/job-extraction.job';
 import { processJobProcessingJob, setOllamaModel } from './jobs/job-processing.job';
+import { logger } from './logger';
 
 // Configuration
 const CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || '3', 10);
@@ -31,6 +32,7 @@ async function main() {
   console.log('Checking embedding model availability...');
   const modelAvailable = await checkEmbeddingModelAvailable();
   if (!modelAvailable) {
+    logger.error('Embedding model "nomic-embed-text" is not available in Ollama. Install it with: ollama pull nomic-embed-text', { source: 'worker' });
     console.error('✗ Embedding model "nomic-embed-text" is not available in Ollama.');
     console.error('  Install it with: ollama pull nomic-embed-text');
     process.exit(1);
@@ -63,6 +65,7 @@ async function main() {
     console.log(`Using Ollama model: ${ollamaModel}`);
     setOllamaModel(ollamaModel);
   } else {
+    logger.warning('Ollama not available - job descriptions will not be summarized', { source: 'worker' });
     console.warn('Ollama not available - job descriptions will not be summarized');
     setOllamaModel(null);
   }
@@ -100,10 +103,15 @@ async function main() {
   });
 
   queue.on('failed', (job, err) => {
+    logger.error(`Job ${job.id} failed after ${job.attemptsMade} attempts: ${err.message}`, {
+      source: 'worker',
+      context: { jobId: job.id, attempts: job.attemptsMade }
+    });
     console.error(`Job ${job.id} failed after ${job.attemptsMade} attempts:`, err.message);
   });
 
   queue.on('stalled', (job) => {
+    logger.warning(`Job ${job.id} stalled`, { source: 'worker', context: { jobId: job.id } });
     console.warn(`Job ${job.id} stalled`);
   });
 
@@ -164,6 +172,7 @@ async function main() {
 }
 
 main().catch((error) => {
+  logger.errorFromException(error, { source: 'worker' });
   console.error('Worker error:', error);
   closeDatabase();
   process.exit(1);

@@ -2,6 +2,7 @@ import { authorize, testGmailConnection } from './gmail-auth';
 import { fetchEmails, fetchEmailBodies, processEmailsWithProgress } from './email-scanner';
 import { checkOllamaAvailability, getBestModel, categorizeEmail, formatEmailForDisplay, type CategorizedEmail } from './email-categorizer';
 import { getScannedEmailIds, saveEmail, markEmailAsProcessed, getEmailStats, closeDatabase } from './database';
+import { logger } from './logger';
 
 async function main() {
   try {
@@ -12,6 +13,7 @@ async function main() {
     const ollamaAvailable = await checkOllamaAvailability();
 
     if (!ollamaAvailable) {
+      logger.error('Ollama is not available', { source: 'index' });
       console.error('\n✗ Ollama is not available. Please ensure Ollama is running.');
       console.error('Run: ollama serve');
       process.exit(1);
@@ -100,6 +102,7 @@ async function main() {
     // Close database connection
     closeDatabase();
   } catch (error) {
+    logger.errorFromException(error, { source: 'index' });
     console.error('\n✗ Error:', error instanceof Error ? error.message : String(error));
     closeDatabase();
     process.exit(1);

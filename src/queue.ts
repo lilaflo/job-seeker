@@ -4,6 +4,7 @@
  */
 
 import Bull from 'bull';
+import { logger } from './logger';
 
 // Queue configuration
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
@@ -81,11 +82,11 @@ export function getEmbeddingQueue(): Bull.Queue<EmbeddingJobData> {
     });
 
     embeddingQueue.on('error', (err) => {
-      console.error('Embedding queue error:', err);
+      logger.errorFromException(err, { source: 'queue', context: { queue: 'embedding' } });
     });
 
     embeddingQueue.on('failed', (job, err) => {
-      console.error(`Job ${job.id} failed:`, err.message);
+      logger.error(`Embedding job ${job.id} failed: ${err.message}`, { source: 'queue', context: { queue: 'embedding', jobId: job.id } });
     });
   }
 
@@ -152,7 +153,7 @@ export function getJobExtractionQueue(): Bull.Queue<JobExtractionJobData> {
     });
 
     jobExtractionQueue.on('error', (err) => {
-      console.error('Job extraction queue error:', err);
+      logger.errorFromException(err, { source: 'queue', context: { queue: 'job-extraction' } });
     });
   }
 
@@ -201,7 +202,7 @@ export function getJobProcessingQueue(): Bull.Queue<JobProcessingJobData> {
     });
 
     jobProcessingQueue.on('error', (err) => {
-      console.error('Job processing queue error:', err);
+      logger.errorFromException(err, { source: 'queue', context: { queue: 'job-processing' } });
     });
   }
 
