@@ -50,7 +50,8 @@ Job Seeker is an automation tool that:
   - Description preview with hover for full text
   - Statistics display (total jobs, with salary, with descriptions)
   - API endpoints for jobs and platforms data
-- Comprehensive unit test coverage: **233 tests passing** (vitest)
+- Comprehensive unit test coverage: **310 tests passing** (vitest)
+- Git pre-commit hooks with automated test enforcement
 - TypeScript-only codebase with strict type checking
 
 ### 🔜 To Be Implemented
@@ -327,15 +328,18 @@ For every new feature or bug fix:
 - All tests located in src/__tests__/ directory
 - Test files follow naming: `<module-name>.test.ts`
 
-**Current Test Coverage** (233 tests passing):
+**Current Test Coverage** (310 tests passing):
 - `gmail-auth.test.ts` - 8 tests (OAuth authentication, token management)
 - `email-scanner.test.ts` - 14 tests (email fetching, body extraction, progress bars)
 - `email-categorizer.test.ts` - 13 tests (domain check, Ollama integration, error handling)
 - `job-portal-domains.test.ts` - 15 tests (domain extraction, whitelist matching, case sensitivity)
 - `url-extractor.test.ts` - 28 tests (URL extraction, job title parsing, deduplication)
 - `job-scraper.test.ts` - 43 tests (salary extraction: ranges, single values, formats, currencies, periods, k-suffix handling)
-- `database.test.ts` - 93 tests (emails, jobs, skills, salary, descriptions, processed flag, platform tracking)
-- `server.test.ts` - 19 tests (API endpoints, job/platform data, filtering, sorting)
+- `database.test.ts` - 96 tests (emails, jobs, skills, salary, descriptions, processed flag, platform tracking, logs)
+- `server.test.ts` - 33 tests (API endpoints, job/platform data, filtering, sorting)
+- `jobs.test.ts` - 8 tests (Bull job processors: embedding, extraction, processing)
+- `logger.test.ts` - 25 tests (logging system: database persistence, log levels, context, stack traces)
+- `embeddings.test.ts` - 27 tests (vector embeddings, semantic search, blacklist matching)
 
 **Running Tests**:
 ```bash
