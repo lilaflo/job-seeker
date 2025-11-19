@@ -31,6 +31,7 @@ export interface StoredJob {
   created_at: string;
   scanned_at: string;
   email_date: string | null;
+  blacklisted: number;
 }
 
 export interface StoredSkill {
@@ -352,6 +353,7 @@ export function getScannedJobLinks(): string[] {
 export function getJobs(filter?: {
   emailId?: number;
   limit?: number;
+  includeBlacklisted?: boolean;
 }): StoredJob[] {
   const database = getDatabase();
 
@@ -360,12 +362,18 @@ export function getJobs(filter?: {
       j.id, j.title, j.link, j.email_id,
       j.salary_min, j.salary_max, j.salary_currency, j.salary_period,
       j.description, j.created_at, j.scanned_at,
-      e.created_at as email_date
+      e.created_at as email_date,
+      j.blacklisted
     FROM jobs j
     LEFT JOIN emails e ON j.email_id = e.id
     WHERE 1=1
   `;
   const params: any[] = [];
+
+  // Filter out blacklisted jobs by default
+  if (!filter?.includeBlacklisted) {
+    query += ' AND j.blacklisted = 0';
+  }
 
   if (filter?.emailId !== undefined) {
     query += ' AND j.email_id = ?';
@@ -381,6 +389,31 @@ export function getJobs(filter?: {
 
   const stmt = database.prepare(query);
   return stmt.all(...params) as StoredJob[];
+}
+
+/**
+ * Mark a job as blacklisted or not
+ */
+export function markJobBlacklisted(jobId: number, blacklisted: boolean): void {
+  const database = getDatabase();
+  database.prepare('UPDATE jobs SET blacklisted = ? WHERE id = ?').run(blacklisted ? 1 : 0, jobId);
+}
+
+/**
+ * Reset all jobs to not blacklisted
+ */
+export function resetAllJobsBlacklisted(): void {
+  const database = getDatabase();
+  database.prepare('UPDATE jobs SET blacklisted = 0').run();
+}
+
+/**
+ * Get count of blacklisted jobs
+ */
+export function getBlacklistedJobCount(): number {
+  const database = getDatabase();
+  const result = database.prepare('SELECT COUNT(*) as count FROM jobs WHERE blacklisted = 1').get() as { count: number };
+  return result.count;
 }
 
 /**

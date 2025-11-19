@@ -74,9 +74,19 @@ vi.mock('../scan-runner', () => ({
   })),
 }));
 
+// Mock the embeddings module for blacklist functions
+vi.mock('../embeddings', () => ({
+  getBlacklistText: vi.fn(() => 'keyword1\nkeyword2\nkeyword3'),
+  updateBlacklistFromText: vi.fn((text: string) => {
+    const keywords = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    return Promise.resolve({ count: keywords.length, jobsBlacklisted: 0 });
+  }),
+}));
+
 // Import mocked functions for assertions
 import { getJobs, getJobStats, getPlatforms, deleteJob } from '../database';
 import { runScan } from '../scan-runner';
+import { getBlacklistText, updateBlacklistFromText } from '../embeddings';
 
 describe('Server API endpoints', () => {
   beforeEach(() => {
@@ -318,5 +328,60 @@ describe('GET /api/scan/status', () => {
     const statusResponse = { scanning: false };
     expect(statusResponse).toHaveProperty('scanning');
     expect(typeof statusResponse.scanning).toBe('boolean');
+  });
+});
+
+describe('Blacklist API endpoints', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('GET /api/blacklist', () => {
+    it('should return blacklist text from embeddings module', () => {
+      const text = (getBlacklistText as ReturnType<typeof vi.fn>)();
+
+      expect(text).toBe('keyword1\nkeyword2\nkeyword3');
+      expect(getBlacklistText).toHaveBeenCalled();
+    });
+
+    it('should return keywords as newline-separated text', () => {
+      const text = (getBlacklistText as ReturnType<typeof vi.fn>)();
+      const keywords = text.split('\n');
+
+      expect(keywords).toHaveLength(3);
+      expect(keywords[0]).toBe('keyword1');
+      expect(keywords[1]).toBe('keyword2');
+      expect(keywords[2]).toBe('keyword3');
+    });
+  });
+
+  describe('POST /api/blacklist', () => {
+    it('should update blacklist with provided text', async () => {
+      const inputText = 'newkeyword1\nnewkeyword2';
+      const result = await (updateBlacklistFromText as ReturnType<typeof vi.fn>)(inputText);
+
+      expect(result.count).toBe(2);
+      expect(updateBlacklistFromText).toHaveBeenCalledWith(inputText);
+    });
+
+    it('should handle empty text', async () => {
+      const result = await (updateBlacklistFromText as ReturnType<typeof vi.fn>)('');
+
+      expect(result.count).toBe(0);
+    });
+
+    it('should trim whitespace and filter empty lines', async () => {
+      const inputText = '  keyword1  \n\n  keyword2  \n  ';
+      const result = await (updateBlacklistFromText as ReturnType<typeof vi.fn>)(inputText);
+
+      expect(result.count).toBe(2);
+    });
+
+    it('should return count of processed keywords', async () => {
+      const inputText = 'one\ntwo\nthree\nfour\nfive';
+      const result = await (updateBlacklistFromText as ReturnType<typeof vi.fn>)(inputText);
+
+      expect(result.count).toBe(5);
+    });
   });
 });

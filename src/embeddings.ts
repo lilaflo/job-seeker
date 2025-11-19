@@ -4,12 +4,43 @@
  */
 
 import { Ollama } from 'ollama';
-import { getDatabase } from './database';
+import { getDatabase, getJobs, markJobBlacklisted, resetAllJobsBlacklisted, getBlacklistedJobCount } from './database';
 import * as sqliteVec from 'sqlite-vec';
 
 // Embedding model configuration
 const EMBEDDING_MODEL = 'nomic-embed-text';
 const EMBEDDING_DIM = 768;
+
+// Queue configuration
+const BLACKLIST_CONCURRENCY = 3; // Number of concurrent embedding operations for blacklist
+
+/**
+ * Process items in a queue with concurrency control
+ */
+async function processQueue<T, R>(
+  items: T[],
+  processor: (item: T) => Promise<R>,
+  concurrency: number
+): Promise<Array<R>> {
+  const results: Array<R> = [];
+  let currentIndex = 0;
+
+  async function processNext(): Promise<void> {
+    while (currentIndex < items.length) {
+      const index = currentIndex++;
+      const item = items[index];
+      results[index] = await processor(item);
+    }
+  }
+
+  // Start concurrent workers
+  const workers = Array(Math.min(concurrency, items.length))
+    .fill(null)
+    .map(() => processNext());
+
+  await Promise.all(workers);
+  return results;
+}
 
 // Ollama client (lazy initialized)
 let ollamaClient: Ollama | null = null;
@@ -27,6 +58,21 @@ function getOllamaClient(): Ollama {
  */
 export function resetOllamaClient(): void {
   ollamaClient = null;
+}
+
+/**
+ * Check if the embedding model is available in Ollama
+ */
+export async function checkEmbeddingModelAvailable(): Promise<boolean> {
+  try {
+    const client = getOllamaClient();
+    const response = await client.list();
+    const modelNames = response.models.map(m => m.name.split(':')[0]);
+    return modelNames.includes(EMBEDDING_MODEL);
+  } catch (error) {
+    console.debug(`Failed to check embedding model: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
 }
 
 /**
@@ -266,6 +312,176 @@ export function getEmbeddingStats(): {
 export function clearAllEmbeddings(): void {
   const db = getDatabase();
   db.prepare('DELETE FROM job_embeddings').run();
+}
+
+// ============================================================================
+// Blacklist Functions
+// ============================================================================
+
+export interface BlacklistKeyword {
+  id: number;
+  keyword: string;
+  embedding: Buffer | null;
+  embedding_dim: number | null;
+  model: string | null;
+  created_at: string;
+}
+
+/**
+ * Get all blacklist keywords
+ */
+export function getBlacklistKeywords(): BlacklistKeyword[] {
+  const db = getDatabase();
+  return db.prepare('SELECT * FROM blacklist ORDER BY keyword ASC').all() as BlacklistKeyword[];
+}
+
+/**
+ * Get blacklist keywords as text (one per line)
+ */
+export function getBlacklistText(): string {
+  const keywords = getBlacklistKeywords();
+  return keywords.map(k => k.keyword).join('\n');
+}
+
+/**
+ * Clear all blacklist keywords
+ */
+export function clearBlacklist(): void {
+  const db = getDatabase();
+  db.prepare('DELETE FROM blacklist').run();
+}
+
+/**
+ * Save a blacklist keyword with its embedding
+ */
+export function saveBlacklistKeyword(keyword: string, embedding: number[]): void {
+  const db = getDatabase();
+  const buffer = embeddingToBuffer(embedding);
+
+  db.prepare(`
+    INSERT OR REPLACE INTO blacklist (keyword, embedding, embedding_dim, model)
+    VALUES (?, ?, ?, ?)
+  `).run(keyword, buffer, embedding.length, EMBEDDING_MODEL);
+}
+
+/**
+ * Update blacklist from text (one keyword per line)
+ * Clears existing blacklist, generates new embeddings, and marks matching jobs
+ */
+export async function updateBlacklistFromText(text: string): Promise<{ count: number; jobsBlacklisted: number }> {
+  // Parse keywords (one per line, trim whitespace, remove empty lines)
+  const keywords = text
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0);
+
+  // Clear existing blacklist
+  clearBlacklist();
+
+  // Reset all jobs to not blacklisted
+  resetAllJobsBlacklisted();
+
+  // If no keywords, return early
+  if (keywords.length === 0) {
+    return { count: 0, jobsBlacklisted: 0 };
+  }
+
+  // Generate embeddings for keywords in parallel using queue
+  const blacklistEmbeddings = await processQueue(
+    keywords,
+    async (keyword) => {
+      const embedding = await generateEmbedding(keyword);
+      saveBlacklistKeyword(keyword, embedding);
+      return { keyword, embedding };
+    },
+    BLACKLIST_CONCURRENCY
+  );
+
+  // Get all jobs with their embeddings for fast comparison
+  const db = getDatabase();
+  const jobsWithEmbeddings = db.prepare(`
+    SELECT j.id, j.title, e.embedding
+    FROM jobs j
+    INNER JOIN job_embeddings e ON j.id = e.job_id
+  `).all() as Array<{ id: number; title: string; embedding: Buffer }>;
+
+  // Check each job's embedding against blacklist embeddings
+  let jobsBlacklisted = 0;
+  const minSimilarity = 0.7;
+
+  for (const job of jobsWithEmbeddings) {
+    const jobEmbedding = bufferToEmbedding(job.embedding);
+
+    // Check against each blacklist keyword
+    for (const { embedding: blacklistEmb } of blacklistEmbeddings) {
+      const similarity = cosineSimilarity(jobEmbedding, blacklistEmb);
+      if (similarity >= minSimilarity) {
+        markJobBlacklisted(job.id, true);
+        jobsBlacklisted++;
+        break; // No need to check other keywords once matched
+      }
+    }
+  }
+
+  return { count: keywords.length, jobsBlacklisted };
+}
+
+/**
+ * Check if text matches any blacklisted keyword using semantic similarity
+ */
+export async function isBlacklisted(
+  text: string,
+  options: { minSimilarity?: number } = {}
+): Promise<{ blacklisted: boolean; matchedKeyword?: string; similarity?: number }> {
+  const { minSimilarity = 0.7 } = options;
+
+  const keywords = getBlacklistKeywords();
+  if (keywords.length === 0) {
+    return { blacklisted: false };
+  }
+
+  // Generate embedding for the text
+  const textEmbedding = await generateEmbedding(text);
+
+  // Check similarity with each blacklisted keyword
+  for (const keyword of keywords) {
+    if (!keyword.embedding) continue;
+
+    const keywordEmbedding = bufferToEmbedding(keyword.embedding);
+    const similarity = cosineSimilarity(textEmbedding, keywordEmbedding);
+
+    if (similarity >= minSimilarity) {
+      return {
+        blacklisted: true,
+        matchedKeyword: keyword.keyword,
+        similarity,
+      };
+    }
+  }
+
+  return { blacklisted: false };
+}
+
+/**
+ * Check if a job title/description matches blacklist
+ */
+export async function isJobBlacklisted(
+  title: string,
+  description: string | null,
+  options: { minSimilarity?: number } = {}
+): Promise<{ blacklisted: boolean; matchedKeyword?: string; similarity?: number }> {
+  // Check title first
+  const titleResult = await isBlacklisted(title, options);
+  if (titleResult.blacklisted) {
+    return titleResult;
+  }
+
+  // Check description if available
+  if (description) {
+    return isBlacklisted(description, options);
+  }
+
+  return { blacklisted: false };
 }
 
 export { EMBEDDING_MODEL, EMBEDDING_DIM };

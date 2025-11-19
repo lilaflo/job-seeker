@@ -81,6 +81,7 @@ describe('database', () => {
         salary_currency TEXT,
         salary_period TEXT CHECK(salary_period IN ('yearly', 'monthly', 'weekly', 'daily', 'hourly')),
         description TEXT,
+        blacklisted INTEGER NOT NULL DEFAULT 0 CHECK(blacklisted IN (0, 1)),
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         scanned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE SET NULL
@@ -139,6 +140,16 @@ describe('database', () => {
         FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS idx_job_embeddings_model ON job_embeddings(model);
+
+      CREATE TABLE IF NOT EXISTS blacklist (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        keyword TEXT NOT NULL UNIQUE,
+        embedding BLOB,
+        embedding_dim INTEGER DEFAULT 768,
+        model TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_blacklist_keyword ON blacklist(keyword);
 
       -- Insert test skills
       INSERT INTO job_skills (name, category, proficiency_level) VALUES
