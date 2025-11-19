@@ -8,6 +8,7 @@ import { fetchEmails, fetchEmailBodies, processEmailsWithProgress } from './emai
 import { checkOllamaAvailability, getBestModel, categorizeEmail, type CategorizedEmail } from './email-categorizer';
 import { getScannedEmailIds, saveEmail, markEmailAsProcessed, getEmailStats, getDatabase } from './database';
 import { enqueueJobExtraction, checkRedisConnection } from './queue';
+import { logger } from './logger';
 
 export interface ScanResult {
   success: boolean;
@@ -188,6 +189,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
     const redisAvailable = await checkRedisConnection();
 
     if (!redisAvailable) {
+      logger.warning('Redis not available - job extraction will not be queued. Start Redis with: docker-compose up -d', { source: 'scan-runner' });
       console.warn('⚠ Redis not available - job extraction will not be queued');
       console.warn('  Start Redis with: docker-compose up -d');
     } else {
@@ -209,6 +211,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
           const savedEmail = db.prepare('SELECT id FROM emails WHERE gmail_id = ?').get(email.id) as { id: number } | undefined;
 
           if (!savedEmail) {
+            logger.error(`Email ${email.id} not found in database`, { source: 'scan-runner', context: { gmailId: email.id } });
             console.error(`Email ${email.id} not found in database`);
             continue;
           }
@@ -228,6 +231,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
             message: `Enqueued ${i + 1}/${jobRelatedEmails.length} job extraction jobs`
           });
         } catch (error) {
+          logger.errorFromException(error, { source: 'scan-runner', context: { gmailId: email.id, subject: email.subject } });
           console.error(`Failed to enqueue job extraction for email ${email.id}:`, error);
         }
       }

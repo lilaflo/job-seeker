@@ -16,6 +16,7 @@ import {
   getJobEmbedding,
 } from '../embeddings';
 import { markJobBlacklisted } from '../database';
+import { logger } from '../logger';
 
 // Pre-fetch blacklist embeddings for fast comparison
 const blacklistKeywords = getBlacklistKeywords();
@@ -63,6 +64,7 @@ export async function processEmbeddingJob(
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.errorFromException(error, { source: 'embedding.job', context: { jobId, title } });
     console.error(`  ✗ Job ${jobId} failed: ${errorMessage}`);
     throw error; // Re-throw to trigger Bull's retry mechanism
   }

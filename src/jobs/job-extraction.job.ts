@@ -11,6 +11,7 @@ import {
 } from '../queue';
 import { extractJobUrls, extractJobTitle, deduplicateUrls } from '../url-extractor';
 import { saveJob, isJobScanned, getDatabase } from '../database';
+import { logger } from '../logger';
 
 export async function processJobExtractionJob(
   job: Bull.Job<JobExtractionJobData>
@@ -29,7 +30,9 @@ export async function processJobExtractionJob(
       const emailByGmailId = db.prepare('SELECT id, gmail_id, subject FROM emails WHERE gmail_id = ?').get(gmailId) as { id: number; gmail_id: string; subject: string } | undefined;
 
       if (emailByGmailId) {
-        console.error(`  ✗ Email ID mismatch: Received emailId=${emailId}, but email exists with id=${emailByGmailId.id} (gmail_id=${gmailId})`);
+        const errorMsg = `Email ID mismatch: Received emailId=${emailId}, but email exists with id=${emailByGmailId.id} (gmail_id=${gmailId})`;
+        logger.error(errorMsg, { source: 'job-extraction.job', context: { emailId, gmailId, correctId: emailByGmailId.id } });
+        console.error(`  ✗ ${errorMsg}`);
         throw new Error(`Email ID mismatch: Expected ${emailId}, found ${emailByGmailId.id} for gmail_id ${gmailId}`);
       }
 
@@ -92,6 +95,7 @@ export async function processJobExtractionJob(
           console.debug(`  ✗ Job not found after save: ${url}`);
         }
       } catch (saveError) {
+        logger.errorFromException(saveError, { source: 'job-extraction.job', context: { title, url, emailId } });
         console.error(`  ✗ Failed to save job ${title}: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
         console.error(`    - Full error:`, saveError);
         // Continue with next job instead of failing entire batch
@@ -107,6 +111,7 @@ export async function processJobExtractionJob(
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.errorFromException(error, { source: 'job-extraction.job', context: { emailId, gmailId, subject } });
     console.error(`  ✗ Job extraction failed for email ${emailId}: ${errorMessage}`);
 
     return {
