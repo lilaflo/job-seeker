@@ -1,0 +1,25 @@
+#!/bin/bash
+#
+# Pre-commit hook that runs tests before allowing commit
+#
+
+echo "Running pre-commit hook: Testing..."
+echo ""
+
+# Run tests
+pnpm test
+
+# Capture exit code
+TEST_EXIT_CODE=$?
+
+# If tests failed, prevent commit
+if [ $TEST_EXIT_CODE -ne 0 ]; then
+  echo ""
+  echo "❌ Tests failed! Commit blocked."
+  echo "   Fix the failing tests and try again."
+  exit 1
+fi
+
+echo ""
+echo "✅ All tests passed! Proceeding with commit."
+exit 0
