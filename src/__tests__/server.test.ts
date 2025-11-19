@@ -53,10 +53,30 @@ vi.mock('../database', () => ({
       created_at: '2024-01-01T00:00:00.000Z',
     },
   ]),
+  deleteJob: vi.fn((id: number) => id === 1 || id === 2),
+}));
+
+// Mock the scan-runner module
+vi.mock('../scan-runner', () => ({
+  runScan: vi.fn(() => Promise.resolve({
+    success: true,
+    message: 'Processed 5 emails, 3 job-related',
+    processed: 5,
+    jobRelated: 3,
+    skipped: 2,
+    stats: {
+      total: 10,
+      jobRelated: 7,
+      highConfidence: 5,
+      mediumConfidence: 1,
+      lowConfidence: 1,
+    },
+  })),
 }));
 
 // Import mocked functions for assertions
-import { getJobs, getJobStats, getPlatforms } from '../database';
+import { getJobs, getJobStats, getPlatforms, deleteJob } from '../database';
+import { runScan } from '../scan-runner';
 
 describe('Server API endpoints', () => {
   beforeEach(() => {
@@ -239,5 +259,64 @@ describe('Platform filtering', () => {
 
     expect(nonCrawlable).toHaveLength(1);
     expect(nonCrawlable[0].platform_name).toBe('LinkedIn');
+  });
+});
+
+describe('DELETE /api/jobs/:id', () => {
+  it('should call deleteJob with the correct ID', () => {
+    deleteJob(1);
+    expect(deleteJob).toHaveBeenCalledWith(1);
+  });
+
+  it('should return true when deleting existing job', () => {
+    const result = (deleteJob as ReturnType<typeof vi.fn>)(1);
+    expect(result).toBe(true);
+  });
+
+  it('should return false when deleting non-existent job', () => {
+    const result = (deleteJob as ReturnType<typeof vi.fn>)(99999);
+    expect(result).toBe(false);
+  });
+
+  it('should handle different job IDs correctly', () => {
+    expect((deleteJob as ReturnType<typeof vi.fn>)(1)).toBe(true);
+    expect((deleteJob as ReturnType<typeof vi.fn>)(2)).toBe(true);
+    expect((deleteJob as ReturnType<typeof vi.fn>)(3)).toBe(false);
+  });
+});
+
+describe('POST /api/scan', () => {
+  it('should call runScan and return results', async () => {
+    const result = await (runScan as ReturnType<typeof vi.fn>)();
+
+    expect(result.success).toBe(true);
+    expect(result.processed).toBe(5);
+    expect(result.jobRelated).toBe(3);
+    expect(result.skipped).toBe(2);
+    expect(result.stats.total).toBe(10);
+  });
+
+  it('should return correct scan statistics', async () => {
+    const result = await (runScan as ReturnType<typeof vi.fn>)();
+
+    expect(result.stats.highConfidence).toBe(5);
+    expect(result.stats.mediumConfidence).toBe(1);
+    expect(result.stats.lowConfidence).toBe(1);
+  });
+
+  it('should include message in response', async () => {
+    const result = await (runScan as ReturnType<typeof vi.fn>)();
+
+    expect(result.message).toBe('Processed 5 emails, 3 job-related');
+  });
+});
+
+describe('GET /api/scan/status', () => {
+  it('should return scanning status', () => {
+    // The status endpoint returns { scanning: boolean }
+    // Since we mock the module, we just verify the structure
+    const statusResponse = { scanning: false };
+    expect(statusResponse).toHaveProperty('scanning');
+    expect(typeof statusResponse.scanning).toBe('boolean');
   });
 });

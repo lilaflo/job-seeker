@@ -7,7 +7,11 @@
 import http from 'http';
 import path from 'path';
 import fs from 'fs';
-import { getJobs, getJobStats, getPlatforms } from './database';
+import { getJobs, getJobStats, getPlatforms, deleteJob } from './database';
+import { runScan, type ScanResult } from './scan-runner';
+
+// Track if a scan is currently running
+let scanInProgress = false;
 
 const PORT = process.env.PORT || 3001;
 
@@ -85,12 +89,122 @@ function handlePlatformsApi(res: http.ServerResponse): void {
 }
 
 /**
+ * API endpoint to delete a job
+ */
+function handleDeleteJobApi(jobId: number, res: http.ServerResponse): void {
+  try {
+    const deleted = deleteJob(jobId);
+
+    if (deleted) {
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      });
+      res.end(JSON.stringify({ success: true, message: 'Job deleted' }));
+    } else {
+      res.writeHead(404, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      });
+      res.end(JSON.stringify({ error: 'Job not found' }));
+    }
+  } catch (error) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Failed to delete job' }));
+  }
+}
+
+/**
+ * API endpoint to trigger email scan
+ */
+async function handleScanApi(res: http.ServerResponse): Promise<void> {
+  // Check if scan is already in progress
+  if (scanInProgress) {
+    res.writeHead(409, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify({ error: 'Scan already in progress' }));
+    return;
+  }
+
+  try {
+    scanInProgress = true;
+
+    const result: ScanResult = await runScan({
+      query: 'newer_than:7d',
+      maxResults: 50,
+    });
+
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify(result));
+  } catch (error) {
+    console.error('Scan error:', error);
+    res.writeHead(500, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify({
+      success: false,
+      error: error instanceof Error ? error.message : 'Scan failed'
+    }));
+  } finally {
+    scanInProgress = false;
+  }
+}
+
+/**
+ * API endpoint to check scan status
+ */
+function handleScanStatusApi(res: http.ServerResponse): void {
+  res.writeHead(200, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*'
+  });
+  res.end(JSON.stringify({ scanning: scanInProgress }));
+}
+
+/**
  * Main request handler
  */
 function requestHandler(req: http.IncomingMessage, res: http.ServerResponse): void {
   const url = req.url || '/';
 
   console.debug(`${new Date().toISOString()} - ${req.method} ${url}`);
+
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type'
+    });
+    res.end();
+    return;
+  }
+
+  // POST /api/scan - trigger email scan
+  if (url === '/api/scan' && req.method === 'POST') {
+    handleScanApi(res);
+    return;
+  }
+
+  // GET /api/scan/status - check scan status
+  if (url === '/api/scan/status' && req.method === 'GET') {
+    handleScanStatusApi(res);
+    return;
+  }
+
+  // DELETE /api/jobs/:id
+  const deleteMatch = url.match(/^\/api\/jobs\/(\d+)$/);
+  if (deleteMatch && req.method === 'DELETE') {
+    const jobId = parseInt(deleteMatch[1], 10);
+    handleDeleteJobApi(jobId, res);
+    return;
+  }
 
   // API endpoints
   if (url.startsWith('/api/jobs')) {
@@ -120,8 +234,10 @@ const server = http.createServer(requestHandler);
 server.listen(PORT, () => {
   console.log(`\n🚀 Job Seeker Web Server running at http://localhost:${PORT}`);
   console.log(`   API endpoints:`);
-  console.log(`   - GET /api/jobs - Fetch job listings`);
-  console.log(`   - GET /api/platforms - Fetch platform info\n`);
+  console.log(`   - GET  /api/jobs - Fetch job listings`);
+  console.log(`   - GET  /api/platforms - Fetch platform info`);
+  console.log(`   - POST /api/scan - Trigger email scan`);
+  console.log(`   - GET  /api/scan/status - Check scan status\n`);
 });
 
 // Handle graceful shutdown
