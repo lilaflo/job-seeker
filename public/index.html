@@ -860,6 +860,26 @@
                 this.scannedEmails = [];
                 break;
 
+              case "job_updated":
+                console.debug("Job updated:", data.job);
+                // Find and update the job in the jobs array
+                const jobIndex = this.jobs.findIndex((j) => j.id === data.job.id);
+                if (jobIndex !== -1) {
+                  this.jobs[jobIndex] = data.job;
+                  console.debug("Updated job in list:", data.job.title);
+                } else {
+                  console.debug("Job not in current list, ignoring update");
+                }
+                break;
+
+              case "jobs_extracted":
+                console.debug(
+                  `New jobs extracted: ${data.count}, refreshing list`
+                );
+                // Refresh the entire jobs list since new jobs were added
+                this.fetchJobs();
+                break;
+
               case "reload":
                 console.debug("Hot-reload triggered:", data.file);
                 // Reload the page after a short delay to allow file to be fully written

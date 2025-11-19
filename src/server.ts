@@ -13,6 +13,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import chokidar from "chokidar";
 import {
   getJobs,
+  getJobById,
   getJobStats,
   getPlatforms,
   deleteJob,
@@ -20,6 +21,8 @@ import {
 } from "./database";
 import {
   checkRedisConnection,
+  getJobProcessingQueue,
+  getJobExtractionQueue,
 } from "./queue";
 import { logger } from "./logger";
 
@@ -612,6 +615,65 @@ wss.on("connection", (ws) => {
     wsClients.delete(ws);
   });
 });
+
+// Setup Bull queue event listeners for real-time job updates
+async function setupQueueListeners(): Promise<void> {
+  try {
+    const redisAvailable = await checkRedisConnection();
+    if (!redisAvailable) {
+      console.debug("Redis not available - real-time job updates disabled");
+      return;
+    }
+
+    const jobProcessingQueue = getJobProcessingQueue();
+    const jobExtractionQueue = getJobExtractionQueue();
+
+    // Listen for job processing completion
+    jobProcessingQueue.on('completed', async (job, result) => {
+      try {
+        console.debug(`Job processing completed: ${job.id}`);
+
+        // Fetch the updated job from database
+        const updatedJob = getJobById(result.jobId);
+
+        if (updatedJob) {
+          // Broadcast the update to all connected clients
+          broadcast({
+            type: 'job_updated',
+            job: updatedJob,
+          });
+        }
+      } catch (error) {
+        logger.errorFromException(error, { source: 'server', context: { component: 'queue-listener', jobId: result.jobId } });
+        console.error('Error handling job completion:', error);
+      }
+    });
+
+    // Listen for job extraction completion (when new jobs are added)
+    jobExtractionQueue.on('completed', async (job, result) => {
+      try {
+        console.debug(`Job extraction completed: ${job.id}, extracted ${result.jobsExtracted} jobs`);
+
+        // Broadcast that new jobs were added (frontend should refresh)
+        broadcast({
+          type: 'jobs_extracted',
+          count: result.jobsExtracted,
+        });
+      } catch (error) {
+        logger.errorFromException(error, { source: 'server', context: { component: 'queue-listener', emailId: result.emailId } });
+        console.error('Error handling job extraction completion:', error);
+      }
+    });
+
+    console.debug("✓ Queue event listeners initialized");
+  } catch (error) {
+    logger.errorFromException(error, { source: 'server', context: { component: 'queue-setup' } });
+    console.error("Failed to setup queue listeners:", error);
+  }
+}
+
+// Initialize queue listeners
+setupQueueListeners();
 
 // Enable hot-reloading in development mode
 const isDevelopment = process.env.NODE_ENV !== "production";
