@@ -309,6 +309,11 @@ async function handleResetDatabaseApi(res: http.ServerResponse): Promise<void> {
     const walPath = dbPath + "-wal";
     const shmPath = dbPath + "-shm";
 
+    // Save blacklist keywords before reset
+    const { getBlacklistKeywords, saveBlacklistKeyword, bufferToEmbedding } = await import("./embeddings");
+    const blacklistKeywords = getBlacklistKeywords();
+    console.debug(`Saving ${blacklistKeywords.length} blacklist keywords before reset`);
+
     // Close the database connection first
     closeDatabase();
 
@@ -320,6 +325,48 @@ async function handleResetDatabaseApi(res: http.ServerResponse): Promise<void> {
     // Run migrations
     const { stdout, stderr: _stderr } = await execAsync("./migrate.sh");
 
+    // Restore blacklist keywords
+    if (blacklistKeywords.length > 0) {
+      console.debug(`Restoring ${blacklistKeywords.length} blacklist keywords`);
+      for (const kw of blacklistKeywords) {
+        if (kw.embedding) {
+          const embedding = bufferToEmbedding(kw.embedding);
+          saveBlacklistKeyword(kw.keyword, embedding);
+        }
+      }
+      console.debug(`✓ Restored ${blacklistKeywords.length} blacklist keywords`);
+    }
+
+    // Clear all Redis queues
+    const redisAvailable = await checkRedisConnection();
+    if (redisAvailable) {
+      console.debug("Clearing Redis queues...");
+      const { getEmbeddingQueue, getJobExtractionQueue, getJobProcessingQueue } = await import("./queue");
+
+      const embeddingQueue = getEmbeddingQueue();
+      const extractionQueue = getJobExtractionQueue();
+      const processingQueue = getJobProcessingQueue();
+
+      // Empty all queues (removes all jobs: waiting, active, completed, failed, delayed, paused)
+      await Promise.all([
+        embeddingQueue.empty(),
+        extractionQueue.empty(),
+        processingQueue.empty(),
+      ]);
+
+      // Clean all jobs (removes job data from Redis)
+      await Promise.all([
+        embeddingQueue.clean(0, 'completed'),
+        embeddingQueue.clean(0, 'failed'),
+        extractionQueue.clean(0, 'completed'),
+        extractionQueue.clean(0, 'failed'),
+        processingQueue.clean(0, 'completed'),
+        processingQueue.clean(0, 'failed'),
+      ]);
+
+      console.debug("✓ Redis queues cleared");
+    }
+
     res.writeHead(200, {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
@@ -327,8 +374,9 @@ async function handleResetDatabaseApi(res: http.ServerResponse): Promise<void> {
     res.end(
       JSON.stringify({
         success: true,
-        message: "Database reset successfully",
+        message: `Database reset successfully. Blacklist preserved (${blacklistKeywords.length} keywords). Redis queues cleared.`,
         output: stdout,
+        blacklistRestored: blacklistKeywords.length,
       })
     );
   } catch (error) {
