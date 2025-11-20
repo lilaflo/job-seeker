@@ -12,7 +12,7 @@ const EMBEDDING_MODEL = 'nomic-embed-text';
 const EMBEDDING_DIM = 768;
 
 // Queue configuration
-const BLACKLIST_CONCURRENCY = 3; // Number of concurrent embedding operations for blacklist
+const BLACKLIST_CONCURRENCY = 10; // Number of concurrent embedding operations for blacklist
 
 /**
  * Process items in a queue with concurrency control
@@ -349,6 +349,8 @@ export async function updateBlacklistFromText(text: string): Promise<{ count: nu
     .map(line => line.trim())
     .filter(line => line.length > 0);
 
+  console.log(`🔄 Updating blacklist with ${keywords.length} keywords...`);
+
   // Clear existing blacklist
   clearBlacklist();
 
@@ -357,19 +359,27 @@ export async function updateBlacklistFromText(text: string): Promise<{ count: nu
 
   // If no keywords, return early
   if (keywords.length === 0) {
+    console.log('✓ Blacklist cleared');
     return { count: 0, jobsBlacklisted: 0 };
   }
 
   // Generate embeddings for keywords in parallel using queue
+  console.log(`  → Generating embeddings for ${keywords.length} keywords (concurrency: ${BLACKLIST_CONCURRENCY})...`);
+  let processed = 0;
   const blacklistEmbeddings = await processQueue(
     keywords,
     async (keyword) => {
       const embedding = await generateEmbedding(keyword);
       saveBlacklistKeyword(keyword, embedding);
+      processed++;
+      if (processed % 5 === 0 || processed === keywords.length) {
+        console.log(`    ✓ Generated ${processed}/${keywords.length} embeddings`);
+      }
       return { keyword, embedding };
     },
     BLACKLIST_CONCURRENCY
   );
+  console.log(`  ✓ All ${keywords.length} embeddings generated`);
 
   // Get all jobs with their embeddings for fast comparison
   const db = getDatabase();
@@ -378,6 +388,8 @@ export async function updateBlacklistFromText(text: string): Promise<{ count: nu
     FROM jobs j
     INNER JOIN job_embeddings e ON j.id = e.job_id
   `).all() as Array<{ id: number; title: string; embedding: Buffer }>;
+
+  console.log(`  → Checking ${jobsWithEmbeddings.length} jobs against blacklist...`);
 
   // Check each job's embedding against blacklist embeddings
   let jobsBlacklisted = 0;
@@ -392,10 +404,13 @@ export async function updateBlacklistFromText(text: string): Promise<{ count: nu
       if (similarity >= minSimilarity) {
         markJobBlacklisted(job.id, true);
         jobsBlacklisted++;
+        console.debug(`    ✗ Job ${job.id} blacklisted: "${job.title}" (similarity: ${similarity.toFixed(2)})`);
         break; // No need to check other keywords once matched
       }
     }
   }
+
+  console.log(`✓ Blacklist updated: ${keywords.length} keywords, ${jobsBlacklisted} jobs hidden`);
 
   return { count: keywords.length, jobsBlacklisted };
 }
