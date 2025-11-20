@@ -69,11 +69,14 @@ export async function processJobProcessingJob(
     }
 
     // Generate embedding
+    console.debug(`  → Generating embedding for job ${jobId}...`);
     await generateAndSaveJobEmbedding(jobId, title, scrapedDescription);
     hasEmbedding = true;
+    console.debug(`  ✓ Embedding generated for job ${jobId}`);
 
     // Check against blacklist
     if (blacklistEmbeddings.length > 0) {
+      console.debug(`  → Checking job ${jobId} against ${blacklistEmbeddings.length} blacklist keywords...`);
       const jobEmbedding = getJobEmbedding(jobId);
 
       if (jobEmbedding) {
@@ -82,8 +85,12 @@ export async function processJobProcessingJob(
           if (similarity >= minSimilarity) {
             markJobBlacklisted(jobId, true);
             isBlacklisted = true;
+            console.debug(`  ✗ Job ${jobId} matched blacklist (similarity: ${similarity.toFixed(2)})`);
             break;
           }
+        }
+        if (!isBlacklisted) {
+          console.debug(`  ✓ Job ${jobId} passed blacklist check`);
         }
       }
     }
@@ -91,7 +98,9 @@ export async function processJobProcessingJob(
     console.debug(`  ✓ Job ${jobId} processed (desc: ${hasDescription}, emb: ${hasEmbedding}, blacklist: ${isBlacklisted})`);
 
     // Mark job as completed
+    console.debug(`  → Setting job ${jobId} status to 'completed'...`);
     updateJobProcessingStatus(jobId, 'completed');
+    console.debug(`  ✓ Job ${jobId} status updated to 'completed'`);
 
     return {
       jobId,
