@@ -517,44 +517,290 @@
         @keydown.escape.window="closeModal()"
       >
         <div
-          class="bg-white dark:bg-gray-800 rounded-xl max-w-3xl w-full my-10 shadow-2xl animate-modal"
+          class="bg-white dark:bg-gray-800 rounded-xl max-w-4xl w-full my-10 shadow-2xl animate-modal"
           x-show="selectedJob"
         >
           <!-- Modal header -->
           <div
-            class="bg-gradient-to-br from-primary-500 to-primary-700 text-white p-6 rounded-t-xl"
+            class="bg-gradient-to-br from-primary-500 via-primary-600 to-primary-700 text-white p-8 rounded-t-xl relative overflow-hidden"
           >
-            <h2
-              class="text-xl font-semibold mb-4 leading-tight"
-              x-text="selectedJob?.title || 'Untitled'"
-            ></h2>
-            <div class="flex flex-wrap gap-4 text-sm">
-              <div class="flex items-center gap-1.5">
-                <strong class="opacity-80">Link:</strong>
-                <a
-                  :href="selectedJob?.link"
-                  target="_blank"
-                  class="underline"
-                  x-text="getDomain(selectedJob?.link || '')"
-                  >View Job</a
-                >
-              </div>
-              <div class="flex items-center gap-1.5">
-                <strong class="opacity-80">Salary:</strong>
-                <span x-text="formatSalaryText(selectedJob)"></span>
-              </div>
-              <div class="flex items-center gap-1.5">
-                <strong class="opacity-80">Date:</strong>
-                <span x-text="formatDate(selectedJob?.created_at)"></span>
+            <!-- Decorative background pattern -->
+            <div class="absolute inset-0 opacity-10" style="background-image: radial-gradient(circle at 1px 1px, white 1px, transparent 1px); background-size: 20px 20px;"></div>
+
+            <div class="relative">
+              <h2
+                class="text-2xl font-bold mb-6 leading-tight"
+                x-text="selectedJob?.title || 'Untitled'"
+              ></h2>
+              <div class="flex flex-wrap gap-6 text-sm">
+                <div class="flex items-center gap-2 bg-white/10 backdrop-blur-sm rounded-lg px-3 py-2">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+                  </svg>
+                  <a
+                    :href="selectedJob?.link"
+                    target="_blank"
+                    class="font-medium hover:underline"
+                    x-text="getDomain(selectedJob?.link || '')"
+                    >View Job</a
+                  >
+                </div>
+                <div class="flex items-center gap-2 bg-white/10 backdrop-blur-sm rounded-lg px-3 py-2">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                  </svg>
+                  <span class="font-medium" x-text="formatSalaryText(selectedJob)"></span>
+                </div>
+                <div class="flex items-center gap-2 bg-white/10 backdrop-blur-sm rounded-lg px-3 py-2">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                  </svg>
+                  <span x-text="formatDate(selectedJob?.created_at)"></span>
+                </div>
               </div>
             </div>
           </div>
 
           <!-- Modal body -->
           <div
-            class="p-6 max-h-[60vh] overflow-y-auto prose prose-sm dark:prose-invert max-w-none prose-headings:text-gray-800 dark:prose-headings:text-gray-200 prose-p:text-gray-700 dark:prose-p:text-gray-300"
+            class="modal-description p-8 max-h-[70vh] overflow-y-auto"
             x-html="renderDescription(selectedJob)"
           ></div>
+
+          <style>
+            /* Beautiful job description styling */
+            .modal-description {
+              animation: fadeIn 0.3s ease-in;
+            }
+
+            @keyframes fadeIn {
+              from {
+                opacity: 0;
+                transform: translateY(10px);
+              }
+              to {
+                opacity: 1;
+                transform: translateY(0);
+              }
+            }
+
+            /* Headers */
+            .modal-description h2 {
+              font-size: 1.5rem;
+              font-weight: 700;
+              color: #1f2937;
+              margin-top: 2rem;
+              margin-bottom: 1.25rem;
+              padding-bottom: 0.75rem;
+              border-bottom: 2px solid rgba(59, 130, 246, 0.2);
+              position: relative;
+              padding-left: 1.25rem;
+            }
+
+            .modal-description h2:first-child {
+              margin-top: 0;
+            }
+
+            .dark .modal-description h2 {
+              color: #ffffff;
+              border-bottom-color: rgba(59, 130, 246, 0.3);
+            }
+
+            .modal-description h2::before {
+              content: '';
+              position: absolute;
+              left: 0;
+              top: 0;
+              width: 6px;
+              height: 2rem;
+              background: linear-gradient(to bottom, #3b82f6, #2563eb);
+              border-radius: 9999px;
+            }
+
+            .modal-description h3 {
+              font-size: 1.25rem;
+              font-weight: 600;
+              color: #374151;
+              margin-top: 1.5rem;
+              margin-bottom: 0.75rem;
+            }
+
+            .dark .modal-description h3 {
+              color: #f3f4f6;
+            }
+
+            /* Paragraphs */
+            .modal-description p {
+              font-size: 1rem;
+              line-height: 1.8;
+              color: #374151;
+              margin-bottom: 1rem;
+            }
+
+            .dark .modal-description p {
+              color: #d1d5db;
+            }
+
+            /* Lists */
+            .modal-description ul {
+              margin-top: 1.25rem;
+              margin-bottom: 1.25rem;
+              padding-left: 0;
+              list-style: none;
+            }
+
+            .modal-description li {
+              color: #374151;
+              padding-left: 2.5rem;
+              position: relative;
+              line-height: 1.75;
+              padding-top: 0.25rem;
+              padding-bottom: 0.25rem;
+              margin-bottom: 0.75rem;
+            }
+
+            .dark .modal-description li {
+              color: #d1d5db;
+            }
+
+            .modal-description li::before {
+              content: '▸';
+              position: absolute;
+              left: 0.5rem;
+              color: #3b82f6;
+              font-weight: 700;
+              font-size: 1.25rem;
+            }
+
+            .dark .modal-description li::before {
+              color: #60a5fa;
+            }
+
+            /* Inline formatting */
+            .modal-description strong {
+              color: #111827;
+              font-weight: 600;
+            }
+
+            .dark .modal-description strong {
+              color: #ffffff;
+            }
+
+            .modal-description em {
+              font-style: italic;
+              color: #4b5563;
+            }
+
+            .dark .modal-description em {
+              color: #9ca3af;
+            }
+
+            .modal-description code {
+              background-color: #f3f4f6;
+              color: #2563eb;
+              padding: 0.25rem 0.5rem;
+              border-radius: 0.25rem;
+              font-size: 0.875rem;
+              font-family: ui-monospace, monospace;
+              border: 1px solid #e5e7eb;
+            }
+
+            .dark .modal-description code {
+              background-color: #374151;
+              color: #60a5fa;
+              border-color: #4b5563;
+            }
+
+            .modal-description blockquote {
+              border-left: 4px solid #3b82f6;
+              background-color: #eff6ff;
+              padding-left: 1rem;
+              padding-right: 1rem;
+              padding-top: 0.75rem;
+              padding-bottom: 0.75rem;
+              margin-top: 1rem;
+              margin-bottom: 1rem;
+              font-style: italic;
+              color: #374151;
+              border-radius: 0 0.25rem 0.25rem 0;
+            }
+
+            .dark .modal-description blockquote {
+              background-color: rgba(59, 130, 246, 0.1);
+              color: #d1d5db;
+            }
+
+            .modal-description a {
+              color: #2563eb;
+              text-decoration: underline;
+              text-decoration-thickness: 2px;
+              text-underline-offset: 2px;
+              transition: color 0.2s;
+            }
+
+            .dark .modal-description a {
+              color: #60a5fa;
+            }
+
+            .modal-description a:hover {
+              color: #1d4ed8;
+            }
+
+            .dark .modal-description a:hover {
+              color: #93c5fd;
+            }
+
+            .modal-description hr {
+              margin-top: 2rem;
+              margin-bottom: 2rem;
+              border-color: #e5e7eb;
+            }
+
+            .dark .modal-description hr {
+              border-color: #374151;
+            }
+
+            /* Scrollbar styling */
+            .modal-description::-webkit-scrollbar {
+              width: 10px;
+            }
+
+            .modal-description::-webkit-scrollbar-track {
+              background-color: #f3f4f6;
+              border-radius: 0.25rem;
+            }
+
+            .dark .modal-description::-webkit-scrollbar-track {
+              background-color: #374151;
+            }
+
+            .modal-description::-webkit-scrollbar-thumb {
+              background-color: #d1d5db;
+              border-radius: 0.25rem;
+              transition: background-color 0.2s;
+            }
+
+            .dark .modal-description::-webkit-scrollbar-thumb {
+              background-color: #4b5563;
+            }
+
+            .modal-description::-webkit-scrollbar-thumb:hover {
+              background-color: #9ca3af;
+            }
+
+            .dark .modal-description::-webkit-scrollbar-thumb:hover {
+              background-color: #6b7280;
+            }
+
+            /* Section spacing */
+            .modal-description > *:first-child {
+              margin-top: 0 !important;
+            }
+
+            .modal-description > *:last-child {
+              margin-bottom: 0 !important;
+            }
+          </style>
 
           <!-- Modal footer -->
           <div

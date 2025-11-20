@@ -1,9 +1,17 @@
 /**
- * Tests for job-scraper module - salary extraction functionality
+ * Tests for job-scraper module - salary extraction and description formatting
  */
 
-import { describe, it, expect } from "vitest";
-import { parseSalaryFromText, extractSalary } from "../job-scraper";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { parseSalaryFromText, extractSalary, extractRawJobDescription, extractJobDescription } from "../job-scraper";
+
+// Mock the Ollama client module
+const mockGenerate = vi.fn();
+vi.mock('../ollama-client', () => ({
+  getOllamaClient: vi.fn(() => ({
+    generate: mockGenerate,
+  })),
+}));
 
 describe("parseSalaryFromText", () => {
   describe("salary ranges", () => {
@@ -346,5 +354,183 @@ describe("extractSalary", () => {
     // Should find the first salary range
     expect(result.min).toBe(100000);
     expect(result.max).toBe(120000);
+  });
+});
+
+describe("extractRawJobDescription", () => {
+  it("should extract text from common job description selectors", () => {
+    const html = `
+      <html>
+        <body>
+          <div class="job-description">
+            We are looking for a talented software engineer with 5+ years of experience.
+            Strong knowledge of TypeScript and Node.js required.
+          </div>
+        </body>
+      </html>
+    `;
+    const result = extractRawJobDescription(html);
+    expect(result).toContain("software engineer");
+    expect(result).toContain("TypeScript");
+    expect(result).toContain("Node.js");
+  });
+
+  it("should remove noise elements like scripts and navigation", () => {
+    const html = `
+      <html>
+        <head>
+          <script>console.log('test');</script>
+        </head>
+        <body>
+          <nav>Navigation</nav>
+          <header>Header</header>
+          <div class="job-description">
+            Job description content here
+          </div>
+          <footer>Footer</footer>
+        </body>
+      </html>
+    `;
+    const result = extractRawJobDescription(html);
+    expect(result).toContain("Job description content");
+    expect(result).not.toContain("Navigation");
+    expect(result).not.toContain("Header");
+    expect(result).not.toContain("Footer");
+    expect(result).not.toContain("console.log");
+  });
+
+  it("should fall back to body text when no specific selector found", () => {
+    const html = `
+      <html>
+        <body>
+          <p>Join our team as a Senior Developer!</p>
+        </body>
+      </html>
+    `;
+    const result = extractRawJobDescription(html);
+    expect(result).toContain("Senior Developer");
+  });
+});
+
+describe("extractJobDescription", () => {
+  beforeEach(() => {
+    mockGenerate.mockReset();
+  });
+
+  it("should return raw text when no model is provided", async () => {
+    const html = `
+      <html>
+        <body>
+          <div class="job-description">
+            We are looking for a talented software engineer.
+          </div>
+        </body>
+      </html>
+    `;
+    const result = await extractJobDescription(html);
+    expect(result).toContain("software engineer");
+    expect(result).not.toContain("##"); // Should not have Markdown headers
+  });
+
+  it("should generate formatted Markdown when model is provided", async () => {
+    mockGenerate.mockResolvedValue({
+      response: `## Overview
+We are seeking a talented software engineer to join our team.
+
+## Key Responsibilities
+- Develop new features
+- Write clean code
+- Review pull requests
+
+## Required Qualifications
+- 5+ years of experience
+- Strong TypeScript knowledge`,
+    });
+
+    // Create HTML with enough text to trigger Ollama formatting (> 200 chars)
+    const longDescription = "We are looking for a talented software engineer with 5+ years of experience in full-stack development. " +
+      "You will be responsible for building scalable applications and working with modern technologies. " +
+      "This is an excellent opportunity to join a growing team and make a significant impact.";
+
+    const html = `
+      <html>
+        <body>
+          <div class="job-description">
+            ${longDescription}
+          </div>
+        </body>
+      </html>
+    `;
+
+    const result = await extractJobDescription(html, "Senior Software Engineer", "llama3.2");
+
+    expect(result).toContain("## Overview");
+    expect(result).toContain("## Key Responsibilities");
+    expect(result).toContain("## Required Qualifications");
+    expect(mockGenerate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "llama3.2",
+        options: expect.objectContaining({
+          temperature: 0.2,
+        }),
+      })
+    );
+  });
+
+  it("should fall back to raw text if Ollama formatting fails", async () => {
+    mockGenerate.mockRejectedValue(new Error("Ollama error"));
+
+    const html = `
+      <html>
+        <body>
+          <div class="job-description">
+            We are looking for a talented software engineer.
+          </div>
+        </body>
+      </html>
+    `;
+
+    const result = await extractJobDescription(html, "Senior Software Engineer", "llama3.2");
+
+    // Should fall back to raw text
+    expect(result).toContain("software engineer");
+    expect(result).not.toContain("##"); // Should not have Markdown headers
+  });
+
+  it("should fall back to raw text if Ollama returns invalid response", async () => {
+    mockGenerate.mockResolvedValue({
+      response: "Short text without headers", // Too short and no Markdown
+    });
+
+    const html = `
+      <html>
+        <body>
+          <div class="job-description">
+            We are looking for a talented software engineer with excellent skills.
+          </div>
+        </body>
+      </html>
+    `;
+
+    const result = await extractJobDescription(html, "Senior Software Engineer", "llama3.2");
+
+    // Should fall back to raw text
+    expect(result).toContain("software engineer");
+  });
+
+  it("should skip Ollama formatting if text is too short", async () => {
+    const html = `
+      <html>
+        <body>
+          <div class="job-description">Short text</div>
+        </body>
+      </html>
+    `;
+
+    const result = await extractJobDescription(html, "Job Title", "llama3.2");
+
+    // Should not call Ollama for text shorter than 200 characters
+    expect(mockGenerate).not.toHaveBeenCalled();
+    expect(result).toBe("Short text");
   });
 });

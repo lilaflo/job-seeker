@@ -88,9 +88,9 @@ const NOISE_SELECTORS = [
 ];
 
 /**
- * Extracts job description text from HTML
+ * Extracts raw job description text from HTML (used as input for Ollama)
  */
-export function extractJobDescription(html: string): string {
+export function extractRawJobDescription(html: string): string {
   const $ = cheerio.load(html);
 
   // Remove noise elements
@@ -114,6 +114,127 @@ export function extractJobDescription(html: string): string {
   // Fallback: get all text from body
   const bodyText = $('body').text();
   return cleanText(bodyText);
+}
+
+/**
+ * Uses Ollama to generate a standardized Markdown-formatted job description
+ */
+async function generateFormattedDescription(rawText: string, jobTitle: string | null, model: string): Promise<string | null> {
+  try {
+    const ollama = getOllamaClient();
+
+    // Limit text to 20000 characters for processing
+    const textToAnalyze = rawText.substring(0, 20000);
+
+    const prompt = `You are a job description formatter. Convert the following job posting into a clean, well-structured Markdown document.
+
+Job Title: ${jobTitle || 'Not specified'}
+
+Raw job posting text:
+${textToAnalyze}
+
+IMPORTANT INSTRUCTIONS:
+1. Extract and organize the information into the following Markdown sections (use ## for section headers):
+   - **## Overview** - Brief summary of the role (2-3 sentences)
+   - **## Key Responsibilities** - Bullet list of main duties
+   - **## Required Qualifications** - Bullet list of must-have skills/experience
+   - **## Nice to Have** - Bullet list of preferred/bonus qualifications (if mentioned)
+   - **## Benefits** - Bullet list of perks/benefits (if mentioned)
+   - **## About the Company** - Brief company description (if mentioned)
+
+2. Format rules:
+   - Use bullet points (- ) for lists
+   - Keep it concise and professional
+   - Remove fluff, marketing speak, and legal boilerplate
+   - If a section has no relevant information, omit it entirely
+   - Do NOT include salary information (handled separately)
+   - Do NOT include application instructions or "how to apply" sections
+   - Do NOT add information that isn't in the original text
+
+3. Output ONLY the formatted Markdown, no explanations or meta-commentary
+
+Example output format:
+## Overview
+[Brief 2-3 sentence summary of the role and what the company is looking for]
+
+## Key Responsibilities
+- [Main responsibility 1]
+- [Main responsibility 2]
+- [Main responsibility 3]
+
+## Required Qualifications
+- [Required skill/experience 1]
+- [Required skill/experience 2]
+
+## Nice to Have
+- [Preferred qualification 1]
+- [Preferred qualification 2]
+
+## Benefits
+- [Benefit 1]
+- [Benefit 2]
+
+## About the Company
+[Brief company description if available]
+
+Now format the job posting:`;
+
+    console.debug(`  → Generating formatted description with Ollama (${textToAnalyze.length} chars)...`);
+
+    const response = await ollama.generate({
+      model,
+      prompt,
+      stream: false,
+      options: {
+        temperature: 0.2,
+        num_predict: 2000,
+      },
+    });
+
+    const formattedDescription = response.response.trim();
+
+    // Validate that we got a meaningful response
+    if (formattedDescription.length < 100) {
+      console.debug('  ✗ Ollama returned too short a description');
+      return null;
+    }
+
+    // Check if it looks like Markdown with headers
+    if (!formattedDescription.includes('##')) {
+      console.debug('  ✗ Ollama response does not contain Markdown headers');
+      return null;
+    }
+
+    console.debug(`  ✓ Generated formatted description (${formattedDescription.length} chars)`);
+    return formattedDescription;
+
+  } catch (error) {
+    console.debug(`  ✗ Ollama description formatting error: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+/**
+ * Extracts job description text from HTML
+ * If model is provided, uses Ollama to generate formatted Markdown
+ */
+export async function extractJobDescription(html: string, jobTitle: string | null = null, model?: string): Promise<string> {
+  // Extract raw text first
+  const rawText = extractRawJobDescription(html);
+
+  // If model is provided, try to generate formatted description
+  if (model && rawText.length > 200) {
+    console.debug('  → Attempting to generate formatted Markdown description...');
+    const formatted = await generateFormattedDescription(rawText, jobTitle, model);
+    if (formatted) {
+      console.debug('  ✓ Using Ollama-formatted Markdown description');
+      return formatted;
+    }
+    console.debug('  ✗ Falling back to raw text');
+  }
+
+  // Fallback to raw text
+  return rawText;
 }
 
 /**
@@ -624,8 +745,14 @@ export async function scrapeJobPage(url: string, model?: string): Promise<{
     console.debug(`Fetching job page: ${url}`);
 
     const html = await fetchPageHtml(url);
-    const description = extractJobDescription(html);
+
+    // Extract title first (needed for formatted description)
     const title = extractJobTitle(html);
+
+    // Extract description with Ollama formatting if model is provided
+    const description = await extractJobDescription(html, title, model);
+
+    // Extract salary
     const salary = await extractSalary(html, model);
 
     if (!description || description.length < 100) {
