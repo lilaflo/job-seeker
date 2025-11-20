@@ -472,6 +472,13 @@ async function handleUpdateBlacklistApi(
     const { updateBlacklistFromText } = await import("./embeddings");
     const result = await updateBlacklistFromText(text);
 
+    // Broadcast blacklist update to all connected clients
+    broadcast({
+      type: 'blacklist_updated',
+      count: result.count,
+      jobsBlacklisted: result.jobsBlacklisted,
+    });
+
     res.writeHead(200, {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
@@ -637,11 +644,22 @@ async function setupQueueListeners(): Promise<void> {
         const updatedJob = getJobById(result.jobId);
 
         if (updatedJob) {
-          // Broadcast the update to all connected clients
-          broadcast({
-            type: 'job_updated',
-            job: updatedJob,
-          });
+          // Check if job was blacklisted
+          if (updatedJob.blacklisted) {
+            // Broadcast removal message for blacklisted jobs
+            broadcast({
+              type: 'job_removed',
+              jobId: result.jobId,
+              reason: 'blacklisted',
+            });
+            console.debug(`Job ${result.jobId} was blacklisted and removed from UI`);
+          } else {
+            // Broadcast the update to all connected clients
+            broadcast({
+              type: 'job_updated',
+              job: updatedJob,
+            });
+          }
         }
       } catch (error) {
         logger.errorFromException(error, { source: 'server', context: { component: 'queue-listener', jobId: result.jobId } });
