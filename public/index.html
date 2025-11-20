@@ -390,19 +390,27 @@
               <!-- Job rows -->
               <template x-for="job in paginatedJobs" :key="job.id">
                 <tr
-                  :class="job.processing_status === 'pending'
+                  :class="(job.processing_status === 'pending' || job.processing_status === 'processing')
                     ? 'cursor-not-allowed opacity-60 border-b border-gray-100 dark:border-gray-700'
                     : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700'"
-                  @click="job.processing_status !== 'pending' && openModal(job)"
+                  @click="(job.processing_status === 'completed' || job.processing_status === 'failed') && openModal(job)"
                 >
                   <td
                     class="px-4 py-3 max-w-xs"
                   >
                     <div class="flex items-start gap-2">
+                      <!-- Pending status: pulsing hourglass -->
                       <template x-if="job.processing_status === 'pending'">
                         <span
                           class="text-yellow-500 dark:text-yellow-400 animate-pulse flex-shrink-0 mt-0.5"
                           title="Pending processing"
+                        >⏳</span>
+                      </template>
+                      <!-- Processing status: spinning hourglass -->
+                      <template x-if="job.processing_status === 'processing'">
+                        <span
+                          class="text-blue-500 dark:text-blue-400 flex-shrink-0 mt-0.5 inline-block animate-spin-fast"
+                          title="Processing..."
                         >⏳</span>
                       </template>
                       <div class="flex-1 min-w-0">
@@ -682,6 +690,7 @@
           savingBlacklist: false,
           blacklistResult: null,
           darkMode: false,
+          refreshTimeout: null,
 
           // Computed properties
           get jobsWithSalary() {
@@ -946,12 +955,33 @@
               console.debug("Jobs fetched:", data.jobs?.length || 0);
               this.jobs = data.jobs || [];
               this.currentPage = 1;
+
+              // Auto-refresh if there are jobs being processed
+              this.scheduleAutoRefresh();
             } catch (err) {
               console.error("Error fetching jobs:", err);
               this.error =
                 "Failed to load jobs. Make sure the server is running.";
             } finally {
               this.loading = false;
+            }
+          },
+
+          scheduleAutoRefresh() {
+            // Clear existing timeout
+            if (this.refreshTimeout) {
+              clearTimeout(this.refreshTimeout);
+              this.refreshTimeout = null;
+            }
+
+            // Check if there are any jobs being processed
+            const hasProcessingJobs = this.jobs.some(
+              job => job.processing_status === 'pending' || job.processing_status === 'processing'
+            );
+
+            if (hasProcessingJobs) {
+              console.debug("Scheduling auto-refresh in 2 seconds...");
+              this.refreshTimeout = setTimeout(() => this.fetchJobs(), 2000);
             }
           },
 
