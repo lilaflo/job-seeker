@@ -350,6 +350,18 @@ export function saveJob(
 }
 
 /**
+ * Updates the processing status of a job
+ */
+export function updateJobProcessingStatus(
+  jobId: number,
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+): void {
+  const database = getDatabase();
+  const stmt = database.prepare('UPDATE jobs SET processing_status = ? WHERE id = ?');
+  stmt.run(status, jobId);
+}
+
+/**
  * Gets all scanned job links
  */
 export function getScannedJobLinks(): string[] {

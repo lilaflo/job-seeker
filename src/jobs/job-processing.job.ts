@@ -19,6 +19,7 @@ import {
   markJobBlacklisted,
   saveJob,
   canCrawlUrl,
+  updateJobProcessingStatus,
 } from '../database';
 import { scrapeJobPage } from '../job-scraper';
 import { logger } from '../logger';
@@ -42,6 +43,9 @@ export async function processJobProcessingJob(
   const { jobId, title, url, emailId } = job.data;
 
   console.debug(`🔍 Processing job ${jobId}: ${title.substring(0, 40)}...`);
+
+  // Mark job as processing
+  updateJobProcessingStatus(jobId, 'processing');
 
   try {
     let hasDescription = false;
@@ -85,6 +89,9 @@ export async function processJobProcessingJob(
 
     console.debug(`  ✓ Job ${jobId} processed (desc: ${hasDescription}, emb: ${hasEmbedding}, blacklist: ${isBlacklisted})`);
 
+    // Mark job as completed
+    updateJobProcessingStatus(jobId, 'completed');
+
     return {
       jobId,
       success: true,
@@ -96,6 +103,9 @@ export async function processJobProcessingJob(
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.errorFromException(error, { source: 'job-processing.job', context: { jobId, title, url } });
     console.error(`  ✗ Job processing failed for job ${jobId}: ${errorMessage}`);
+
+    // Mark job as failed
+    updateJobProcessingStatus(jobId, 'failed');
 
     return {
       jobId,

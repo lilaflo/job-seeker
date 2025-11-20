@@ -7,7 +7,7 @@ import { authorize, testGmailConnection } from './gmail-auth';
 import { fetchEmails, fetchEmailBodies, processEmailsWithProgress } from './email-scanner';
 import { checkOllamaAvailability, getBestModel, categorizeEmail, type CategorizedEmail } from './email-categorizer';
 import { getScannedEmailIds, saveEmail, markEmailAsProcessed, getEmailStats, getDatabase, saveJob, isJobScanned } from './database';
-import { enqueueJobExtraction, checkRedisConnection } from './queue';
+import { enqueueJobExtraction, enqueueJobProcessing, checkRedisConnection } from './queue';
 import { logger } from './logger';
 import { extractJobUrls, deduplicateUrls, extractJobTitle, extractJobsWithTitles } from './url-extractor';
 
@@ -248,6 +248,13 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
             console.debug(`  → Creating job: ${job.title}`);
             saveJob(job.title, job.url, savedEmail.id);
             jobsCreated++;
+
+            // Enqueue job for processing
+            const savedJob = db.prepare('SELECT id FROM jobs WHERE link = ?').get(job.url) as { id: number } | undefined;
+            if (savedJob) {
+              console.debug(`  → Enqueuing job ${savedJob.id} for processing`);
+              await enqueueJobProcessing(savedJob.id, job.title, job.url, savedEmail.id);
+            }
           }
         }
 

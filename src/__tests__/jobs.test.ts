@@ -22,6 +22,7 @@ vi.mock('../database', () => ({
   saveJob: vi.fn(),
   isJobScanned: vi.fn(() => false),
   canCrawlUrl: vi.fn(() => true),
+  updateJobProcessingStatus: vi.fn(),
   getDatabase: vi.fn(() => ({
     prepare: vi.fn(() => ({
       get: vi.fn(() => ({ id: 1 })),
