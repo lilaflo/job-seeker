@@ -42,6 +42,13 @@ vi.mock("../logger", () => ({
   },
 }));
 
+// Mock the pubsub module
+const mockPublishJobEvent = vi.fn();
+
+vi.mock("../pubsub", () => ({
+  publishJobEvent: (...args: any[]) => mockPublishJobEvent(...args),
+}));
+
 describe("processBlacklistEmbeddingJob", () => {
   const mockPrepare = vi.fn();
   const mockAll = vi.fn();
@@ -113,6 +120,11 @@ describe("processBlacklistEmbeddingJob", () => {
     );
     expect(mockMarkJobBlacklisted).toHaveBeenCalledWith(100, true);
     expect(mockMarkJobBlacklisted).toHaveBeenCalledTimes(1);
+    expect(mockPublishJobEvent).toHaveBeenCalledWith({
+      type: 'job_removed',
+      jobId: 100,
+      reason: 'blacklisted',
+    });
   });
 
   it("should handle no matching jobs", async () => {
@@ -145,6 +157,7 @@ describe("processBlacklistEmbeddingJob", () => {
     expect(result.success).toBe(true);
     expect(result.jobsBlacklisted).toBe(0);
     expect(mockMarkJobBlacklisted).not.toHaveBeenCalled();
+    expect(mockPublishJobEvent).not.toHaveBeenCalled();
   });
 
   it("should handle embedding generation failure", async () => {

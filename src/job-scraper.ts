@@ -126,7 +126,7 @@ async function generateFormattedDescription(rawText: string, jobTitle: string | 
     // Limit text to 20000 characters for processing
     const textToAnalyze = rawText.substring(0, 20000);
 
-    const prompt = `You are a job description formatter. Convert the following job posting into a clean, well-structured Markdown document.
+    const prompt = `You are a job description formatter and translator. Convert the following job posting into a clean, well-structured Markdown document IN ENGLISH.
 
 Job Title: ${jobTitle || 'Not specified'}
 
@@ -134,7 +134,13 @@ Raw job posting text:
 ${textToAnalyze}
 
 IMPORTANT INSTRUCTIONS:
-1. Extract and organize the information into the following Markdown sections (use ## for section headers):
+1. LANGUAGE HANDLING:
+   - Detect the language of the job posting
+   - If the posting is NOT in English, translate ALL content to English
+   - If you translated the content, add a note at the very beginning: "*(Original language: [Language Name])*"
+   - Keep the translation natural and professional
+
+2. Extract and organize the information into the following Markdown sections (use ## for section headers):
    - **## Overview** - Brief summary of the role (2-3 sentences)
    - **## Key Responsibilities** - Bullet list of main duties
    - **## Required Qualifications** - Bullet list of must-have skills/experience
@@ -142,42 +148,45 @@ IMPORTANT INSTRUCTIONS:
    - **## Benefits** - Bullet list of perks/benefits (if mentioned)
    - **## About the Company** - Brief company description (if mentioned)
 
-2. Format rules:
+3. Format rules:
    - Use bullet points (- ) for lists
    - Keep it concise and professional
    - Remove fluff, marketing speak, and legal boilerplate
+   - Condense to essential details only
    - If a section has no relevant information, omit it entirely
    - Do NOT include salary information (handled separately)
    - Do NOT include application instructions or "how to apply" sections
    - Do NOT add information that isn't in the original text
 
-3. Output ONLY the formatted Markdown, no explanations or meta-commentary
+4. Output ONLY the formatted Markdown, no explanations or meta-commentary
 
-Example output format:
+Example output format for English posting:
 ## Overview
 [Brief 2-3 sentence summary of the role and what the company is looking for]
 
 ## Key Responsibilities
 - [Main responsibility 1]
 - [Main responsibility 2]
-- [Main responsibility 3]
 
 ## Required Qualifications
 - [Required skill/experience 1]
 - [Required skill/experience 2]
 
-## Nice to Have
-- [Preferred qualification 1]
-- [Preferred qualification 2]
+Example output format for non-English posting (e.g., German):
+*(Original language: German)*
 
-## Benefits
-- [Benefit 1]
-- [Benefit 2]
+## Overview
+[Brief 2-3 sentence summary of the role - TRANSLATED TO ENGLISH]
 
-## About the Company
-[Brief company description if available]
+## Key Responsibilities
+- [Main responsibility 1 - TRANSLATED TO ENGLISH]
+- [Main responsibility 2 - TRANSLATED TO ENGLISH]
 
-Now format the job posting:`;
+## Required Qualifications
+- [Required skill/experience 1 - TRANSLATED TO ENGLISH]
+- [Required skill/experience 2 - TRANSLATED TO ENGLISH]
+
+Now format and translate (if needed) the job posting:`;
 
     console.debug(`  → Generating formatted description with Ollama (${textToAnalyze.length} chars)...`);
 

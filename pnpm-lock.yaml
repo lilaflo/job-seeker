@@ -38,6 +38,9 @@ importers:
       googleapis:
         specifier: ^166.0.0
         version: 166.0.0
+      ioredis:
+        specifier: ^5.8.2
+        version: 5.8.2
       ollama:
         specifier: ^0.6.3
         version: 0.6.3

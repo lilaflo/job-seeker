@@ -25,6 +25,7 @@ import {
   getJobExtractionQueue,
 } from "./queue";
 import { logger } from "./logger";
+import { subscribeToJobEvents, closePubSub } from "./pubsub";
 
 const execAsync = promisify(exec);
 
@@ -750,6 +751,13 @@ async function setupQueueListeners(): Promise<void> {
 // Initialize queue listeners
 setupQueueListeners();
 
+// Subscribe to job events from worker processes (via Redis pub/sub)
+subscribeToJobEvents((message) => {
+  // Forward pub/sub messages to WebSocket clients
+  broadcast(message);
+  console.debug(`Forwarded ${message.type} to WebSocket clients`);
+});
+
 // Enable hot-reloading in development mode
 const isDevelopment = process.env.NODE_ENV !== "production";
 if (isDevelopment) {
@@ -792,8 +800,9 @@ server.listen(PORT, () => {
 });
 
 // Handle graceful shutdown
-process.on("SIGINT", () => {
+process.on("SIGINT", async () => {
   console.log("\nShutting down server...");
+  await closePubSub();
   server.close(() => {
     console.log("Server closed");
     process.exit(0);

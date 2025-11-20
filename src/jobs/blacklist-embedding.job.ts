@@ -19,6 +19,7 @@ import {
   getDatabase,
 } from '../database';
 import { logger } from '../logger';
+import { publishJobEvent } from '../pubsub';
 
 const MIN_SIMILARITY = 0.7;
 
@@ -89,6 +90,13 @@ export async function processBlacklistEmbeddingJob(
           markJobBlacklisted(jobRow.id, true);
           jobsBlacklisted++;
           console.debug(`    ✗ Job ${jobRow.id} blacklisted: "${jobRow.title}" (similarity: ${similarity.toFixed(2)})`);
+
+          // Broadcast job removal via WebSocket
+          await publishJobEvent({
+            type: 'job_removed',
+            jobId: jobRow.id,
+            reason: 'blacklisted',
+          });
         }
       } catch (error) {
         logger.errorFromException(error, {
