@@ -872,11 +872,37 @@
                 }
                 break;
 
+              case "job_removed":
+                console.debug(
+                  `Job removed (${data.reason}):`,
+                  data.jobId
+                );
+                // Remove the job from the jobs array
+                const removeIndex = this.jobs.findIndex(
+                  (j) => j.id === data.jobId
+                );
+                if (removeIndex !== -1) {
+                  const removedJob = this.jobs[removeIndex];
+                  this.jobs.splice(removeIndex, 1);
+                  console.debug(
+                    `Removed job from list: ${removedJob.title} (${data.reason})`
+                  );
+                }
+                break;
+
               case "jobs_extracted":
                 console.debug(
                   `New jobs extracted: ${data.count}, refreshing list`
                 );
                 // Refresh the entire jobs list since new jobs were added
+                this.fetchJobs();
+                break;
+
+              case "blacklist_updated":
+                console.debug(
+                  `Blacklist updated: ${data.jobsBlacklisted} jobs hidden`
+                );
+                // Refresh the entire jobs list to remove blacklisted jobs
                 this.fetchJobs();
                 break;
 
