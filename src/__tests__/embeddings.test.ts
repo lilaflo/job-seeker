@@ -65,11 +65,13 @@ beforeAll(() => {
       salary_period TEXT CHECK(salary_period IN ('yearly', 'monthly', 'weekly', 'daily', 'hourly')),
       description TEXT,
       blacklisted INTEGER NOT NULL DEFAULT 0 CHECK(blacklisted IN (0, 1)),
+      processing_status TEXT NOT NULL DEFAULT 'pending' CHECK(processing_status IN ('pending', 'processing', 'completed', 'failed')),
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       scanned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE SET NULL
     );
     CREATE INDEX IF NOT EXISTS idx_job_link ON jobs(link);
+    CREATE INDEX IF NOT EXISTS idx_jobs_processing_status ON jobs(processing_status);
 
     CREATE TABLE IF NOT EXISTS job_embeddings (
       job_id INTEGER PRIMARY KEY,

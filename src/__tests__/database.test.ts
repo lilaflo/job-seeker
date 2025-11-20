@@ -83,6 +83,7 @@ describe('database', () => {
         salary_period TEXT CHECK(salary_period IN ('yearly', 'monthly', 'weekly', 'daily', 'hourly')),
         description TEXT,
         blacklisted INTEGER NOT NULL DEFAULT 0 CHECK(blacklisted IN (0, 1)),
+        processing_status TEXT NOT NULL DEFAULT 'pending' CHECK(processing_status IN ('pending', 'processing', 'completed', 'failed')),
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         scanned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (email_id) REFERENCES emails(id) ON DELETE SET NULL
@@ -94,6 +95,7 @@ describe('database', () => {
       CREATE INDEX IF NOT EXISTS idx_jobs_salary_max ON jobs(salary_max);
       CREATE INDEX IF NOT EXISTS idx_jobs_salary_currency ON jobs(salary_currency);
       CREATE INDEX IF NOT EXISTS idx_jobs_description ON jobs(description);
+      CREATE INDEX IF NOT EXISTS idx_jobs_processing_status ON jobs(processing_status);
 
       CREATE TABLE IF NOT EXISTS job_skills (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -719,6 +721,26 @@ describe('database', () => {
       expect(jobs).toHaveLength(1);
       expect(jobs[0].title).toBe('Test Job Updated');
       expect(jobs[0].description).toBe(description); // Description should remain
+    });
+
+    it('should create job with default pending processing status', () => {
+      saveJob('New Job', 'https://example.com/job/pending1');
+
+      const jobs = getJobs();
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0].processing_status).toBe('pending');
+    });
+
+    it('should return processing_status in getJobs response', () => {
+      saveJob('Job 1', 'https://example.com/job/status1');
+      saveJob('Job 2', 'https://example.com/job/status2');
+
+      const jobs = getJobs();
+      expect(jobs).toHaveLength(2);
+      jobs.forEach(job => {
+        expect(job.processing_status).toBeDefined();
+        expect(['pending', 'processing', 'completed', 'failed']).toContain(job.processing_status);
+      });
     });
   });
 
