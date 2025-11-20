@@ -51,6 +51,7 @@ export async function processJobProcessingJob(
     let hasDescription = false;
     let hasEmbedding = false;
     let isBlacklisted = false;
+    let scrapedDescription: string | null = null;
 
     // Check if platform can be crawled
     const isCrawlable = canCrawlUrl(url);
@@ -62,13 +63,13 @@ export async function processJobProcessingJob(
       if (!scraped.error && scraped.description && scraped.description.length >= 100) {
         // Save job with description and salary
         saveJob(title, url, emailId ?? undefined, scraped.salary, scraped.description);
+        scrapedDescription = scraped.description;
         hasDescription = true;
       }
     }
 
     // Generate embedding
-    const textToEmbed = hasDescription ? `${title}\n\n${title}` : title;
-    await generateAndSaveJobEmbedding(jobId, title, hasDescription ? title : null);
+    await generateAndSaveJobEmbedding(jobId, title, scrapedDescription);
     hasEmbedding = true;
 
     // Check against blacklist
