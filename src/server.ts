@@ -183,7 +183,7 @@ async function handleScanApi(res: http.ServerResponse): Promise<void> {
 
     const result = await runScan({
       query: "newer_than:7d",
-      maxResults: 50,
+      maxResults: 10,
       onEmailProcessed: (email) => {
         // Broadcast each processed email via WebSocket
         broadcast({
