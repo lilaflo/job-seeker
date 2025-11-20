@@ -981,7 +981,57 @@
 
             if (hasProcessingJobs) {
               console.debug("Scheduling auto-refresh in 2 seconds...");
-              this.refreshTimeout = setTimeout(() => this.fetchJobs(), 2000);
+              this.refreshTimeout = setTimeout(() => this.refreshJobStatus(), 2000);
+            }
+          },
+
+          async refreshJobStatus() {
+            try {
+              console.debug("Refreshing job status...");
+              const response = await fetch("/api/jobs?limit=500");
+              if (!response.ok) {
+                console.error("Failed to refresh job status");
+                return;
+              }
+
+              const data = await response.json();
+              const newJobs = data.jobs || [];
+
+              // Update jobs in place - only modify changed fields
+              newJobs.forEach(newJob => {
+                const existingJobIndex = this.jobs.findIndex(j => j.id === newJob.id);
+
+                if (existingJobIndex !== -1) {
+                  const existingJob = this.jobs[existingJobIndex];
+
+                  // Only update if something actually changed
+                  if (existingJob.processing_status !== newJob.processing_status ||
+                      existingJob.description !== newJob.description ||
+                      existingJob.salary_min !== newJob.salary_min ||
+                      existingJob.blacklisted !== newJob.blacklisted) {
+
+                    // Update the job in place to avoid re-rendering entire list
+                    this.jobs[existingJobIndex] = newJob;
+                    console.debug(`Updated job ${newJob.id}: ${existingJob.processing_status} → ${newJob.processing_status}`);
+                  }
+                } else {
+                  // New job that wasn't in our list - add it
+                  this.jobs.push(newJob);
+                  console.debug(`New job added: ${newJob.title}`);
+                }
+              });
+
+              // Remove jobs that no longer exist (e.g., deleted)
+              this.jobs = this.jobs.filter(job =>
+                newJobs.some(newJob => newJob.id === job.id)
+              );
+
+              // Continue auto-refresh cycle
+              this.scheduleAutoRefresh();
+            } catch (err) {
+              console.error("Error refreshing job status:", err);
+              // Still try to schedule next refresh even on error
+              this.scheduleAutoRefresh();
             }
           },
 
