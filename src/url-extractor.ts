@@ -114,6 +114,42 @@ export function extractJobUrls(text: string): string[] {
 }
 
 /**
+ * Extracts job title and URL pairs from email body
+ * Looks for pattern: "Title - URL"
+ */
+export function extractJobsWithTitles(body: string): Array<{ title: string; url: string }> {
+  if (!body) return [];
+
+  const results: Array<{ title: string; url: string }> = [];
+  const lines = body.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+
+    // Look for lines with " - https://" pattern (title - URL)
+    const match = line.match(/^(.+?)\s+-\s+(https?:\/\/[^\s]+)/);
+    if (match) {
+      let title = match[1].trim();
+      const url = match[2].trim();
+
+      // Clean up the URL (remove HTML entities and trailing chars)
+      const cleanUrl = url
+        .replace(/&amp;/g, '&')
+        .replace(/[.,;:!?)\]}>]+$/, '');
+
+      // Only include if it's a job URL
+      if (JOB_URL_PATTERNS.some((pattern) => pattern.test(cleanUrl)) ||
+          cleanUrl.toLowerCase().includes('/job') ||
+          cleanUrl.toLowerCase().includes('/vacanc')) {
+        results.push({ title, url: cleanUrl });
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
  * Extracts a job title from email subject or body
  * Tries to intelligently parse the subject line
  */

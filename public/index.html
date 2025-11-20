@@ -390,13 +390,29 @@
               <!-- Job rows -->
               <template x-for="job in paginatedJobs" :key="job.id">
                 <tr
-                  class="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700"
-                  @click="openModal(job)"
+                  :class="job.processing_status === 'pending'
+                    ? 'cursor-not-allowed opacity-60 border-b border-gray-100 dark:border-gray-700'
+                    : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700'"
+                  @click="job.processing_status !== 'pending' && openModal(job)"
                 >
                   <td
-                    class="px-4 py-3 font-medium text-gray-800 dark:text-gray-200 max-w-xs truncate"
-                    x-text="job.title || 'Untitled'"
-                  ></td>
+                    class="px-4 py-3 max-w-xs"
+                  >
+                    <div class="flex items-start gap-2">
+                      <template x-if="job.processing_status === 'pending'">
+                        <span
+                          class="text-yellow-500 dark:text-yellow-400 animate-pulse flex-shrink-0 mt-0.5"
+                          title="Pending processing"
+                        >⏳</span>
+                      </template>
+                      <div class="flex-1 min-w-0">
+                        <div class="font-medium text-gray-800 dark:text-gray-200 truncate" x-text="job.title || 'Untitled'"></div>
+                        <template x-if="job.email_subject">
+                          <div class="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5" x-text="'📧 ' + job.email_subject"></div>
+                        </template>
+                      </div>
+                    </div>
+                  </td>
                   <td class="px-4 py-3">
                     <span
                       class="text-primary-500 dark:text-primary-400 max-w-[200px] inline-block truncate"
@@ -1159,7 +1175,13 @@
 
           formatDate(dateStr) {
             if (!dateStr) return "-";
-            const date = new Date(dateStr);
+            // Handle Unix timestamp strings (convert to number)
+            const timestamp = /^\d+$/.test(dateStr) ? parseInt(dateStr, 10) : dateStr;
+            const date = new Date(timestamp);
+
+            // Check if date is valid
+            if (isNaN(date.getTime())) return "Invalid Date";
+
             return date.toLocaleDateString("en-US", {
               month: "short",
               day: "numeric",

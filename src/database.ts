@@ -41,7 +41,9 @@ export interface StoredJob {
   created_at: string;
   scanned_at: string;
   email_date: string | null;
+  email_subject: string | null;
   blacklisted: number;
+  processing_status: 'pending' | 'processing' | 'completed' | 'failed';
 }
 
 export interface StoredSkill {
@@ -373,7 +375,9 @@ export function getJobs(filter?: {
       j.salary_min, j.salary_max, j.salary_currency, j.salary_period,
       j.description, j.created_at, j.scanned_at,
       e.created_at as email_date,
-      j.blacklisted
+      e.subject as email_subject,
+      j.blacklisted,
+      j.processing_status
     FROM jobs j
     LEFT JOIN emails e ON j.email_id = e.id
     WHERE 1=1

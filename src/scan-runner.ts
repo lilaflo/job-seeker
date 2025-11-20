@@ -6,9 +6,10 @@
 import { authorize, testGmailConnection } from './gmail-auth';
 import { fetchEmails, fetchEmailBodies, processEmailsWithProgress } from './email-scanner';
 import { checkOllamaAvailability, getBestModel, categorizeEmail, type CategorizedEmail } from './email-categorizer';
-import { getScannedEmailIds, saveEmail, markEmailAsProcessed, getEmailStats, getDatabase } from './database';
+import { getScannedEmailIds, saveEmail, markEmailAsProcessed, getEmailStats, getDatabase, saveJob, isJobScanned } from './database';
 import { enqueueJobExtraction, checkRedisConnection } from './queue';
 import { logger } from './logger';
+import { extractJobUrls, deduplicateUrls, extractJobTitle, extractJobsWithTitles } from './url-extractor';
 
 export interface ScanResult {
   success: boolean;
@@ -180,63 +181,90 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
   // Calculate results
   const jobRelatedCount = categorizedEmails.filter(e => e.category.isJobRelated).length;
 
-  // Enqueue job extraction for job-related emails
-  let jobsEnqueued = 0;
+  // Create placeholder jobs immediately for job-related emails (for debugging)
+  let jobsCreated = 0;
   const jobRelatedEmails = categorizedEmails.filter(e => e.category.isJobRelated);
 
   if (jobRelatedEmails.length > 0) {
-    // Check if Redis is available
-    const redisAvailable = await checkRedisConnection();
+    emitProgress({
+      type: 'enqueuing_jobs',
+      total: jobRelatedEmails.length,
+      current: 0,
+      message: `Creating ${jobRelatedEmails.length} placeholder jobs...`
+    });
 
-    if (!redisAvailable) {
-      logger.warning('Redis not available - job extraction will not be queued. Start Redis with: docker-compose up -d', { source: 'scan-runner' });
-      console.warn('⚠ Redis not available - job extraction will not be queued');
-      console.warn('  Start Redis with: docker-compose up -d');
-    } else {
-      emitProgress({
-        type: 'enqueuing_jobs',
-        total: jobRelatedEmails.length,
-        current: 0,
-        message: `Enqueuing ${jobRelatedEmails.length} job extraction jobs...`
-      });
+    const db = getDatabase();
+    for (let i = 0; i < jobRelatedEmails.length; i++) {
+      const email = jobRelatedEmails[i];
+      const body = bodies.get(email.id) || '';
 
-      // Enqueue job extraction for each job-related email
-      const db = getDatabase();
-      for (let i = 0; i < jobRelatedEmails.length; i++) {
-        const email = jobRelatedEmails[i];
-        const body = bodies.get(email.id) || '';
+      try {
+        // Get email database ID
+        const savedEmail = db.prepare('SELECT id FROM emails WHERE gmail_id = ?').get(email.id) as { id: number } | undefined;
 
-        try {
-          // Get email database ID
-          const savedEmail = db.prepare('SELECT id FROM emails WHERE gmail_id = ?').get(email.id) as { id: number } | undefined;
+        if (!savedEmail) {
+          logger.error(`Email ${email.id} not found in database`, { source: 'scan-runner', context: { gmailId: email.id } });
+          console.error(`Email ${email.id} not found in database`);
+          continue;
+        }
 
-          if (!savedEmail) {
-            logger.error(`Email ${email.id} not found in database`, { source: 'scan-runner', context: { gmailId: email.id } });
-            console.error(`Email ${email.id} not found in database`);
+        // Extract job titles and URLs from email body
+        const jobsWithTitles = extractJobsWithTitles(body);
+
+        // Fallback to old method if no jobs found with titles
+        if (jobsWithTitles.length === 0) {
+          console.debug(`  → No jobs with titles found, trying URL extraction...`);
+          const jobUrls = extractJobUrls(body);
+
+          if (jobUrls.length === 0) {
+            console.debug(`  → No job URLs found in email ${savedEmail.id}`);
             continue;
           }
 
-          await enqueueJobExtraction(
-            savedEmail.id,
-            email.id,
-            email.subject || 'No subject',
-            body
-          );
-          jobsEnqueued++;
+          const uniqueUrls = deduplicateUrls(jobUrls);
+          const baseTitle = extractJobTitle(email.subject || 'No subject', body);
 
-          emitProgress({
-            type: 'enqueuing_jobs',
-            total: jobRelatedEmails.length,
-            current: i + 1,
-            message: `Enqueued ${i + 1}/${jobRelatedEmails.length} job extraction jobs`
-          });
-        } catch (error) {
-          logger.errorFromException(error, { source: 'scan-runner', context: { gmailId: email.id, subject: email.subject } });
-          console.error(`Failed to enqueue job extraction for email ${email.id}:`, error);
+          for (let j = 0; j < uniqueUrls.length; j++) {
+            const url = uniqueUrls[j];
+            if (isJobScanned(url)) continue;
+
+            const title = uniqueUrls.length > 1 ? `${baseTitle} (${j + 1})` : baseTitle;
+            console.debug(`  → Creating placeholder job: ${title}`);
+            saveJob(title, url, savedEmail.id);
+            jobsCreated++;
+          }
+        } else {
+          // Use extracted titles
+          console.debug(`  → Found ${jobsWithTitles.length} jobs with titles`);
+
+          for (const job of jobsWithTitles) {
+            // Skip if already scanned
+            if (isJobScanned(job.url)) {
+              console.debug(`  → Job already scanned, skipping: ${job.title}`);
+              continue;
+            }
+
+            // Save job with actual title from email
+            console.debug(`  → Creating job: ${job.title}`);
+            saveJob(job.title, job.url, savedEmail.id);
+            jobsCreated++;
+          }
         }
+
+        emitProgress({
+          type: 'enqueuing_jobs',
+          total: jobRelatedEmails.length,
+          current: i + 1,
+          message: `Created jobs for ${i + 1}/${jobRelatedEmails.length} emails`
+        });
+      } catch (error) {
+        logger.errorFromException(error, { source: 'scan-runner', context: { gmailId: email.id, subject: email.subject } });
+        console.error(`Failed to create jobs for email ${email.id}:`, error);
       }
     }
   }
+
+  let jobsEnqueued = jobsCreated; // For backwards compatibility with UI
 
   const stats = getEmailStats();
 
