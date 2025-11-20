@@ -9,9 +9,11 @@
 const JOB_URL_PATTERNS = [
   // LinkedIn
   /https?:\/\/(www\.)?linkedin\.com\/jobs\/view\/\d+/gi,
-  // Indeed
-  /https?:\/\/(www\.)?indeed\.(com|de|uk|fr)\/.*?viewjob/gi,
-  /https?:\/\/(www\.)?indeed\.(com|de|uk|fr)\/rc\/clk/gi,
+  // Indeed (supports www., country codes like ch., and direct domain)
+  /https?:\/\/(www\.|[a-z]{2}\.)?indeed\.[a-z]{2,3}\/.*?viewjob/gi,
+  /https?:\/\/(www\.|[a-z]{2}\.)?indeed\.[a-z]{2,3}\/rc\/clk/gi,
+  /https?:\/\/(www\.|[a-z]{2}\.)?indeed\.[a-z]{2,3}\/pagead\/clk/gi,
+  /https?:\/\/(www\.|[a-z]{2}\.)?indeed\.[a-z]{2,3}\/jobs\?/gi,
   // Freelancermap
   /https?:\/\/(www\.)?freelancermap\.(de|com)\/projektboerse\/project\/\d+/gi,
   /https?:\/\/(www\.)?freelancermap\.(de|com)\/projekt\//gi,
