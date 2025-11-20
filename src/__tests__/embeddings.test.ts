@@ -304,8 +304,8 @@ describe('Embedding storage', () => {
 });
 
 describe('EMBEDDING_DIM constant', () => {
-  it('should be 768 for nomic-embed-text', () => {
-    expect(EMBEDDING_DIM).toBe(768);
+  it('should be 384 for all-MiniLM-L6-v2', () => {
+    expect(EMBEDDING_DIM).toBe(384);
   });
 });
 

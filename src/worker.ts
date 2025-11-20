@@ -9,9 +9,11 @@ import {
   getEmbeddingQueue,
   getJobExtractionQueue,
   getJobProcessingQueue,
+  getBlacklistEmbeddingQueue,
   type EmbeddingJobData,
   type JobExtractionJobData,
   type JobProcessingJobData,
+  type BlacklistEmbeddingJobData,
 } from './queue';
 import { checkEmbeddingModelAvailable } from './embeddings';
 import { closeDatabase } from './database';
@@ -19,6 +21,7 @@ import { checkOllamaAvailability, getBestModel } from './email-categorizer';
 import { processEmbeddingJob } from './jobs/embedding.job';
 import { processJobExtractionJob } from './jobs/job-extraction.job';
 import { processJobProcessingJob, setOllamaModel } from './jobs/job-processing.job';
+import { processBlacklistEmbeddingJob } from './jobs/blacklist-embedding.job';
 import { logger } from './logger';
 
 // Configuration
@@ -32,9 +35,9 @@ async function main() {
   console.log('Checking embedding model availability...');
   const modelAvailable = await checkEmbeddingModelAvailable();
   if (!modelAvailable) {
-    logger.error('Embedding model "nomic-embed-text" is not available in Ollama. Install it with: ollama pull nomic-embed-text', { source: 'worker' });
-    console.error('✗ Embedding model "nomic-embed-text" is not available in Ollama.');
-    console.error('  Install it with: ollama pull nomic-embed-text');
+    logger.error('Embedding model "hf.co/Mungert/all-MiniLM-L6-v2-GGUF" is not available in Ollama. Install it with: ollama pull hf.co/Mungert/all-MiniLM-L6-v2-GGUF', { source: 'worker' });
+    console.error('✗ Embedding model "hf.co/Mungert/all-MiniLM-L6-v2-GGUF" is not available in Ollama.');
+    console.error('  Install it with: ollama pull hf.co/Mungert/all-MiniLM-L6-v2-GGUF');
     process.exit(1);
   }
   console.log('✓ Embedding model is available');
@@ -58,6 +61,11 @@ async function main() {
   await jobProcessingQueue.isReady();
   console.log('Job processing queue ready');
 
+  // Get blacklist embedding queue
+  const blacklistEmbeddingQueue = getBlacklistEmbeddingQueue();
+  await blacklistEmbeddingQueue.isReady();
+  console.log('Blacklist embedding queue ready');
+
   // Get Ollama model for summarization
   const ollamaAvailable = await checkOllamaAvailability();
   if (ollamaAvailable) {
@@ -79,6 +87,7 @@ async function main() {
   let blacklisted = 0;
   let jobsExtracted = 0;
   let jobsProcessed = 0;
+  let blacklistKeywordsProcessed = 0;
 
   // Process embedding jobs
   queue.process(CONCURRENCY, async (job: Bull.Job<EmbeddingJobData>) => {
@@ -144,6 +153,18 @@ async function main() {
     return result;
   });
 
+  // Process blacklist embedding jobs
+  blacklistEmbeddingQueue.process(CONCURRENCY, async (job: Bull.Job<BlacklistEmbeddingJobData>) => {
+    const result = await processBlacklistEmbeddingJob(job);
+
+    if (result.success) {
+      blacklistKeywordsProcessed++;
+      blacklisted += result.jobsBlacklisted;
+    }
+
+    return result;
+  });
+
   // Graceful shutdown
   const shutdown = async () => {
     console.log('\nShutting down worker...');
@@ -151,6 +172,7 @@ async function main() {
     await queue.close();
     await jobExtractionQueue.close();
     await jobProcessingQueue.close();
+    await blacklistEmbeddingQueue.close();
     closeDatabase();
 
     console.log('\n--- Worker Statistics ---');
@@ -159,6 +181,7 @@ async function main() {
     console.log(`Embeddings generated: ${processed}`);
     console.log(`Embeddings succeeded: ${succeeded}`);
     console.log(`Embeddings failed: ${failed}`);
+    console.log(`Blacklist keywords processed: ${blacklistKeywordsProcessed}`);
     console.log(`Jobs blacklisted: ${blacklisted}`);
 
     process.exit(0);

@@ -8,8 +8,8 @@ import * as sqliteVec from 'sqlite-vec';
 import { getOllamaClient, isModelAvailable } from './ollama-client';
 
 // Embedding model configuration
-const EMBEDDING_MODEL = 'nomic-embed-text';
-const EMBEDDING_DIM = 768;
+const EMBEDDING_MODEL = 'hf.co/Mungert/all-MiniLM-L6-v2-GGUF';
+const EMBEDDING_DIM = 384;
 
 // Queue configuration
 const BLACKLIST_CONCURRENCY = 10; // Number of concurrent embedding operations for blacklist
@@ -58,15 +58,22 @@ export function initializeVectorExtension(): void {
 }
 
 /**
- * Generate embedding for text using Ollama
+ * Generate embedding for text using Ollama with timeout
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
   const client = getOllamaClient();
 
-  const response = await client.embeddings({
+  // Add timeout wrapper (20 seconds)
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error('Ollama embedding timeout after 20 seconds')), 20000);
+  });
+
+  const embeddingPromise = client.embeddings({
     model: EMBEDDING_MODEL,
     prompt: text,
   });
+
+  const response = await Promise.race([embeddingPromise, timeoutPromise]);
 
   return response.embedding;
 }
@@ -339,8 +346,45 @@ export function saveBlacklistKeyword(keyword: string, embedding: number[]): void
 }
 
 /**
+ * Save a blacklist keyword without embedding (embedding will be generated later)
+ * Returns the ID of the saved keyword
+ */
+export function saveBlacklistKeywordWithoutEmbedding(keyword: string): number {
+  const db = getDatabase();
+
+  const result = db.prepare(`
+    INSERT INTO blacklist (keyword, embedding, embedding_dim, model)
+    VALUES (?, NULL, NULL, NULL)
+  `).run(keyword);
+
+  return result.lastInsertRowid as number;
+}
+
+/**
+ * Update embedding for an existing blacklist keyword
+ */
+export function updateBlacklistKeywordEmbedding(blacklistId: number, embedding: number[]): void {
+  const db = getDatabase();
+  const buffer = embeddingToBuffer(embedding);
+
+  console.debug(`  → Updating blacklist ${blacklistId}: buffer size=${buffer.length}, dim=${embedding.length}, model=${EMBEDDING_MODEL}`);
+
+  const result = db.prepare(`
+    UPDATE blacklist
+    SET embedding = ?, embedding_dim = ?, model = ?
+    WHERE id = ?
+  `).run(buffer, embedding.length, EMBEDDING_MODEL, blacklistId);
+
+  console.debug(`  → Update result: changes=${result.changes}`);
+
+  if (result.changes === 0) {
+    console.error(`  ✗ WARNING: No rows updated for blacklist ID ${blacklistId}`);
+  }
+}
+
+/**
  * Update blacklist from text (one keyword per line)
- * Clears existing blacklist, generates new embeddings, and marks matching jobs
+ * Saves keywords immediately and queues embedding generation jobs
  */
 export async function updateBlacklistFromText(text: string): Promise<{ count: number; jobsBlacklisted: number }> {
   // Parse keywords (one per line, trim whitespace, remove empty lines)
@@ -363,56 +407,32 @@ export async function updateBlacklistFromText(text: string): Promise<{ count: nu
     return { count: 0, jobsBlacklisted: 0 };
   }
 
-  // Generate embeddings for keywords in parallel using queue
-  console.log(`  → Generating embeddings for ${keywords.length} keywords (concurrency: ${BLACKLIST_CONCURRENCY})...`);
-  let processed = 0;
-  const blacklistEmbeddings = await processQueue(
-    keywords,
-    async (keyword) => {
-      const embedding = await generateEmbedding(keyword);
-      saveBlacklistKeyword(keyword, embedding);
-      processed++;
-      if (processed % 5 === 0 || processed === keywords.length) {
-        console.log(`    ✓ Generated ${processed}/${keywords.length} embeddings`);
-      }
-      return { keyword, embedding };
-    },
-    BLACKLIST_CONCURRENCY
-  );
-  console.log(`  ✓ All ${keywords.length} embeddings generated`);
+  // Save keywords immediately WITHOUT embeddings
+  console.log(`  → Saving ${keywords.length} keywords to database...`);
+  const keywordIds: Array<{ keyword: string; id: number }> = [];
+  for (const keyword of keywords) {
+    const id = saveBlacklistKeywordWithoutEmbedding(keyword);
+    keywordIds.push({ keyword, id });
+  }
+  console.log(`  ✓ Saved ${keywords.length} keywords`);
 
-  // Get all jobs with their embeddings for fast comparison
-  const db = getDatabase();
-  const jobsWithEmbeddings = db.prepare(`
-    SELECT j.id, j.title, e.embedding
-    FROM jobs j
-    INNER JOIN job_embeddings e ON j.id = e.job_id
-  `).all() as Array<{ id: number; title: string; embedding: Buffer }>;
+  // Queue embedding generation jobs (async processing)
+  console.log(`  → Queueing ${keywords.length} embedding jobs...`);
+  const { enqueueBlacklistEmbeddings, checkRedisConnection } = await import('./queue');
 
-  console.log(`  → Checking ${jobsWithEmbeddings.length} jobs against blacklist...`);
-
-  // Check each job's embedding against blacklist embeddings
-  let jobsBlacklisted = 0;
-  const minSimilarity = 0.7;
-
-  for (const job of jobsWithEmbeddings) {
-    const jobEmbedding = bufferToEmbedding(job.embedding);
-
-    // Check against each blacklist keyword
-    for (const { embedding: blacklistEmb } of blacklistEmbeddings) {
-      const similarity = cosineSimilarity(jobEmbedding, blacklistEmb);
-      if (similarity >= minSimilarity) {
-        markJobBlacklisted(job.id, true);
-        jobsBlacklisted++;
-        console.debug(`    ✗ Job ${job.id} blacklisted: "${job.title}" (similarity: ${similarity.toFixed(2)})`);
-        break; // No need to check other keywords once matched
-      }
-    }
+  const redisAvailable = await checkRedisConnection();
+  if (!redisAvailable) {
+    console.error('  ✗ Redis not available - embeddings will not be generated');
+    console.error('    Please start Redis to enable blacklist filtering');
+    return { count: keywords.length, jobsBlacklisted: 0 };
   }
 
-  console.log(`✓ Blacklist updated: ${keywords.length} keywords, ${jobsBlacklisted} jobs hidden`);
+  await enqueueBlacklistEmbeddings(keywordIds);
+  console.log(`  ✓ Queued ${keywords.length} embedding jobs`);
+  console.log(`✓ Blacklist updated: ${keywords.length} keywords saved (embeddings processing in background)`);
 
-  return { count: keywords.length, jobsBlacklisted };
+  // Return immediately - embeddings and job checking happen asynchronously
+  return { count: keywords.length, jobsBlacklisted: 0 };
 }
 
 /**

@@ -54,10 +54,24 @@ export interface JobProcessingJobResult {
   error?: string;
 }
 
+export interface BlacklistEmbeddingJobData {
+  keyword: string;
+  blacklistId: number;
+}
+
+export interface BlacklistEmbeddingJobResult {
+  blacklistId: number;
+  keyword: string;
+  success: boolean;
+  jobsBlacklisted: number;
+  error?: string;
+}
+
 // Queue instances (lazy initialized)
 let embeddingQueue: Bull.Queue<EmbeddingJobData> | null = null;
 let jobExtractionQueue: Bull.Queue<JobExtractionJobData> | null = null;
 let jobProcessingQueue: Bull.Queue<JobProcessingJobData> | null = null;
+let blacklistEmbeddingQueue: Bull.Queue<BlacklistEmbeddingJobData> | null = null;
 
 /**
  * Get or create the embedding queue
@@ -229,6 +243,74 @@ export async function enqueueJobProcessing(
 }
 
 /**
+ * Get or create the blacklist embedding queue
+ */
+export function getBlacklistEmbeddingQueue(): Bull.Queue<BlacklistEmbeddingJobData> {
+  if (!blacklistEmbeddingQueue) {
+    blacklistEmbeddingQueue = new Bull<BlacklistEmbeddingJobData>('blacklist-embedding', {
+      redis: {
+        host: REDIS_HOST,
+        port: REDIS_PORT,
+      },
+      defaultJobOptions: {
+        removeOnComplete: true,
+        removeOnFail: false,
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+        timeout: 30000, // 30 second timeout (20s for embedding + 10s buffer)
+      },
+    });
+
+    blacklistEmbeddingQueue.on('error', (err) => {
+      logger.errorFromException(err, { source: 'queue', context: { queue: 'blacklist-embedding' } });
+    });
+
+    blacklistEmbeddingQueue.on('failed', (job, err) => {
+      logger.error(`Blacklist embedding job ${job.id} failed: ${err.message}`, { source: 'queue', context: { queue: 'blacklist-embedding', jobId: job.id } });
+    });
+  }
+
+  return blacklistEmbeddingQueue;
+}
+
+/**
+ * Add a blacklist embedding job to the queue
+ */
+export async function enqueueBlacklistEmbedding(
+  keyword: string,
+  blacklistId: number
+): Promise<Bull.Job<BlacklistEmbeddingJobData>> {
+  const queue = getBlacklistEmbeddingQueue();
+
+  return queue.add({
+    keyword,
+    blacklistId,
+  });
+}
+
+/**
+ * Add multiple blacklist embedding jobs to the queue
+ */
+export async function enqueueBlacklistEmbeddings(
+  keywords: Array<{ keyword: string; id: number }>
+): Promise<number> {
+  const queue = getBlacklistEmbeddingQueue();
+
+  const bulkJobs = keywords.map(kw => ({
+    data: {
+      keyword: kw.keyword,
+      blacklistId: kw.id,
+    },
+  }));
+
+  await queue.addBulk(bulkJobs);
+  return bulkJobs.length;
+}
+
+/**
  * Get queue statistics
  */
 export async function getQueueStats(): Promise<{
@@ -272,6 +354,10 @@ export async function closeQueues(): Promise<void> {
   if (jobProcessingQueue) {
     await jobProcessingQueue.close();
     jobProcessingQueue = null;
+  }
+  if (blacklistEmbeddingQueue) {
+    await blacklistEmbeddingQueue.close();
+    blacklistEmbeddingQueue = null;
   }
 }
 
