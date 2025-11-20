@@ -720,11 +720,20 @@ async function setupQueueListeners(): Promise<void> {
       try {
         console.debug(`Job extraction completed: ${job.id}, extracted ${result.jobsExtracted} jobs`);
 
-        // Broadcast that new jobs were added (frontend should refresh)
-        broadcast({
-          type: 'jobs_extracted',
-          count: result.jobsExtracted,
-        });
+        if (result.jobsExtracted > 0) {
+          // Fetch the newly created jobs and broadcast them
+          const { getJobs } = await import('./database');
+          const allJobs = getJobs();
+
+          // Broadcast that new jobs were added (frontend should refresh)
+          broadcast({
+            type: 'jobs_extracted',
+            count: result.jobsExtracted,
+            emailId: result.emailId,
+          });
+
+          console.debug(`Broadcast jobs_extracted event: ${result.jobsExtracted} jobs from email ${result.emailId}`);
+        }
       } catch (error) {
         logger.errorFromException(error, { source: 'server', context: { component: 'queue-listener', emailId: result.emailId } });
         console.error('Error handling job extraction completion:', error);
