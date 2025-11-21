@@ -72,13 +72,24 @@ export async function getBestModel(): Promise<string> {
 
 /**
  * Checks if a specific model is available
+ * Supports both full names with tags (e.g., "model:tag") and base names (e.g., "model")
  */
 export async function isModelAvailable(modelName: string): Promise<boolean> {
   try {
     const client = getOllamaClient();
     const response = await client.list();
-    const modelNames = response.models.map(m => m.name.split(':')[0]);
-    return modelNames.includes(modelName);
+
+    // Extract base names from installed models (e.g., "llama3.2" from "llama3.2:latest")
+    const installedBaseNames = response.models.map(m => m.name.split(':')[0]);
+
+    // Also get full names for exact matching
+    const installedFullNames = response.models.map(m => m.name);
+
+    // Extract base name from the model we're looking for
+    const searchBaseName = modelName.split(':')[0];
+
+    // Check if either the full name or base name matches
+    return installedFullNames.includes(modelName) || installedBaseNames.includes(searchBaseName);
   } catch (error) {
     console.debug(`Failed to check model availability: ${error instanceof Error ? error.message : String(error)}`);
     return false;
