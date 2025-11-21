@@ -528,3 +528,4 @@ The project uses a migration system to track and apply database schema changes s
 - **Progress bars not showing**: Check console output isn't being buffered
 - **Tests failing**: Run `pnpm test:ui` for visual debugging
 - **TypeScript errors**: Run `pnpm build` to see all type errors
+- Do not create feature branches
