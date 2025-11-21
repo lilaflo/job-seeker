@@ -15,7 +15,7 @@ import {
   type JobProcessingJobData,
   type BlacklistEmbeddingJobData,
 } from "./queue";
-import { checkEmbeddingModelAvailable } from "./embeddings";
+import { checkEmbeddingModelAvailable, EMBEDDING_MODEL } from "./embeddings";
 import { closeDatabase } from "./database";
 import { checkOllamaAvailability, getBestModel } from "./email-categorizer";
 import { processEmbeddingJob } from "./jobs/embedding.job";
@@ -39,14 +39,12 @@ async function main() {
   const modelAvailable = await checkEmbeddingModelAvailable();
   if (!modelAvailable) {
     logger.error(
-      'Embedding model "%s" is not available in Ollama. Install it with: ollama pull hf.co/Mungert/all-MiniLM-L6-v2-GGUF',
+      `Embedding model "${EMBEDDING_MODEL}" is not available in Ollama. Install it with: ollama pull ${EMBEDDING_MODEL}`,
       { source: "worker" }
     );
     console.error(
-      '✗ Embedding model "hf.co/Mungert/all-MiniLM-L6-v2-GGUF" is not available in Ollama.'
-    );
-    console.error(
-      "  Install it with: ollama pull hf.co/Mungert/all-MiniLM-L6-v2-GGUF"
+      `✗ Embedding model "${EMBEDDING_MODEL}" is not available in Ollama. Install it with: ollama pull ${EMBEDDING_MODEL}`,
+      { source: "worker" }
     );
     process.exit(1);
   }
