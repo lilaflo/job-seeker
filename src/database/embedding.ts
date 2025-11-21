@@ -1,21 +1,21 @@
 /**
  * Embedding Database Functions
  * Handles vector embedding-related database operations using pgvector
+ * Embeddings are now stored directly in the jobs table
  */
 
 import { query } from './index';
 
 /**
- * Save job embedding using pgvector
+ * Save job embedding using pgvector (now stored in jobs table)
  */
 export async function saveJobEmbedding(jobId: number, embedding: number[], model: string): Promise<void> {
   const vectorString = `[${embedding.join(',')}]`;
   await query(
-    `INSERT INTO job_embeddings (job_id, embedding, model)
-     VALUES ($1, $2::vector, $3)
-     ON CONFLICT (job_id)
-     DO UPDATE SET embedding = EXCLUDED.embedding, model = EXCLUDED.model`,
-    [jobId, vectorString, model]
+    `UPDATE jobs
+     SET embedding = $1::vector, embedding_model = $2
+     WHERE id = $3`,
+    [vectorString, model, jobId]
   );
 }
 
@@ -24,11 +24,11 @@ export async function saveJobEmbedding(jobId: number, embedding: number[], model
  */
 export async function getJobEmbedding(jobId: number): Promise<number[] | null> {
   const result = await query<{ embedding: string }>(
-    'SELECT embedding::text FROM job_embeddings WHERE job_id = $1',
+    'SELECT embedding::text FROM jobs WHERE id = $1',
     [jobId]
   );
 
-  if (!result.rows[0]) return null;
+  if (!result.rows[0] || !result.rows[0].embedding) return null;
 
   // Parse pgvector string format: "[0.1,0.2,0.3,...]"
   const embeddingString = result.rows[0].embedding;
@@ -40,11 +40,11 @@ export async function getJobEmbedding(jobId: number): Promise<number[] | null> {
  * Check if job has embedding
  */
 export async function hasJobEmbedding(jobId: number): Promise<boolean> {
-  const result = await query<{ exists: boolean }>(
-    'SELECT EXISTS(SELECT 1 FROM job_embeddings WHERE job_id = $1) as exists',
+  const result = await query<{ has_embedding: boolean }>(
+    'SELECT (embedding IS NOT NULL) as has_embedding FROM jobs WHERE id = $1',
     [jobId]
   );
-  return result.rows[0]?.exists || false;
+  return result.rows[0]?.has_embedding || false;
 }
 
 /**
@@ -52,10 +52,9 @@ export async function hasJobEmbedding(jobId: number): Promise<boolean> {
  */
 export async function getJobsWithoutEmbeddings(): Promise<Array<{ id: number; title: string; description: string | null }>> {
   const result = await query<{ id: number; title: string; description: string | null }>(`
-    SELECT j.id, j.title, j.description
-    FROM jobs j
-    LEFT JOIN job_embeddings e ON j.id = e.job_id
-    WHERE e.job_id IS NULL
+    SELECT id, title, description
+    FROM jobs
+    WHERE embedding IS NULL
   `);
   return result.rows;
 }
@@ -83,14 +82,14 @@ export async function searchSimilarJobsPG(
 
   const result = await query(`
     SELECT
-      j.id, j.title, j.link, j.description,
-      j.salary_min, j.salary_max, j.salary_currency, j.salary_period,
-      j.created_at,
-      1 - (e.embedding <=> $1::vector) as similarity
-    FROM jobs j
-    INNER JOIN job_embeddings e ON j.id = e.job_id
-    WHERE 1 - (e.embedding <=> $1::vector) >= $2
-    ORDER BY e.embedding <=> $1::vector
+      id, title, link, description,
+      salary_min, salary_max, salary_currency, salary_period,
+      created_at,
+      1 - (embedding <=> $1::vector) as similarity
+    FROM jobs
+    WHERE embedding IS NOT NULL
+      AND 1 - (embedding <=> $1::vector) >= $2
+    ORDER BY embedding <=> $1::vector
     LIMIT $3
   `, [vectorString, minSimilarity, limit]);
 
@@ -101,7 +100,7 @@ export async function searchSimilarJobsPG(
  * Clear all job embeddings
  */
 export async function clearAllEmbeddings(): Promise<void> {
-  await query('DELETE FROM job_embeddings');
+  await query('UPDATE jobs SET embedding = NULL, embedding_model = NULL');
 }
 
 /**
@@ -114,8 +113,9 @@ export async function getEmbeddingStats(): Promise<{
 }> {
   const result = await query(`
     SELECT
-      (SELECT COUNT(*) FROM jobs) as total,
-      (SELECT COUNT(*) FROM job_embeddings) as with_embeddings
+      COUNT(*) as total,
+      COUNT(embedding) as with_embeddings
+    FROM jobs
   `);
 
   const row = result.rows[0];
@@ -134,10 +134,10 @@ export async function getEmbeddingStats(): Promise<{
  */
 export async function getJobsWithEmbeddings(): Promise<Array<{ id: number; title: string; embedding: string }>> {
   const result = await query<{ id: number; title: string; embedding: string }>(`
-    SELECT j.id, j.title, e.embedding::text as embedding
-    FROM jobs j
-    INNER JOIN job_embeddings e ON j.id = e.job_id
-    WHERE j.blacklisted = 0
+    SELECT id, title, embedding::text as embedding
+    FROM jobs
+    WHERE embedding IS NOT NULL
+      AND blacklisted = 0
   `);
   return result.rows;
 }
