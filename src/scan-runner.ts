@@ -65,9 +65,22 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
 
   emitProgress({ type: 'start', message: 'Starting email scan...' });
 
-  // Authorize with Gmail
-  const auth = await authorize();
-  await testGmailConnection(auth);
+  // Authorize with Gmail (with automatic retry on expired credentials)
+  let auth = await authorize();
+  try {
+    await testGmailConnection(auth);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    // If credentials expired, re-authorize with fresh OAuth flow
+    if (errorMessage.includes('CREDENTIALS_EXPIRED')) {
+      console.log('Re-authorizing with fresh OAuth flow...');
+      auth = await authorize();
+      await testGmailConnection(auth);
+    } else {
+      throw error;
+    }
+  }
 
   // Check Ollama availability
   const ollamaAvailable = await checkOllamaAvailability();

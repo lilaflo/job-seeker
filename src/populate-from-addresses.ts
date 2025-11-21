@@ -5,7 +5,7 @@
  */
 
 import { google } from 'googleapis';
-import { authorize } from './gmail-auth';
+import { authorize, testGmailConnection } from './gmail-auth';
 import Database from 'better-sqlite3';
 import path from 'path';
 import { logger } from './logger';
@@ -13,8 +13,23 @@ import { logger } from './logger';
 async function populateFromAddresses() {
   console.log('Starting from_address population for existing emails...\n');
 
-  // Get authenticated Gmail client
-  const auth = await authorize();
+  // Get authenticated Gmail client (with automatic retry on expired credentials)
+  let auth = await authorize();
+  try {
+    await testGmailConnection(auth);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    // If credentials expired, re-authorize with fresh OAuth flow
+    if (errorMessage.includes('CREDENTIALS_EXPIRED')) {
+      console.log('Re-authorizing with fresh OAuth flow...');
+      auth = await authorize();
+      await testGmailConnection(auth);
+    } else {
+      throw error;
+    }
+  }
+
   const gmail = google.gmail({ version: 'v1', auth });
 
   // Get emails without from_address

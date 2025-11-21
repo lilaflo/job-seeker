@@ -138,7 +138,21 @@ export async function authorize(): Promise<OAuth2Client> {
 }
 
 /**
+ * Deletes the saved token file
+ */
+async function deleteToken(): Promise<void> {
+  try {
+    await fs.unlink(TOKEN_PATH);
+    console.debug('Deleted expired token file');
+  } catch (error) {
+    // Ignore error if file doesn't exist
+    console.debug('No token file to delete');
+  }
+}
+
+/**
  * Tests the Gmail connection by fetching the user's profile
+ * Automatically re-authenticates if credentials are invalid
  */
 export async function testGmailConnection(auth: OAuth2Client): Promise<void> {
   const gmail = google.gmail({ version: 'v1', auth });
@@ -150,6 +164,20 @@ export async function testGmailConnection(auth: OAuth2Client): Promise<void> {
     console.log(`Total messages: ${profile.data.messagesTotal}`);
     console.log(`Total threads: ${profile.data.threadsTotal}`);
   } catch (error) {
-    throw new Error(`Failed to connect to Gmail: ${error instanceof Error ? error.message : String(error)}`);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    // Check if this is an invalid_grant error (expired/invalid credentials)
+    if (errorMessage.includes('invalid_grant')) {
+      console.log('\n⚠ Google credentials have expired or are invalid');
+      console.log('Deleting old token and re-triggering OAuth flow...\n');
+
+      // Delete the expired token
+      await deleteToken();
+
+      // Re-authorize with a fresh OAuth flow
+      throw new Error('CREDENTIALS_EXPIRED');
+    }
+
+    throw new Error(`Failed to connect to Gmail: ${errorMessage}`);
   }
 }
