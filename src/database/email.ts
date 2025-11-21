@@ -57,7 +57,7 @@ export async function saveEmail(
        raw_source = COALESCE(EXCLUDED.raw_source, emails.raw_source),
        scanned_at = NOW()
      RETURNING id`,
-    [gmailId, subject, fromAddress, body, confidence, isJobRelated ? 1 : 0, reason, platformId || null, rawSource || null]
+    [gmailId, subject, fromAddress, body, confidence, isJobRelated, reason, platformId || null, rawSource || null]
   );
   return result.rows[0].id;
 }
@@ -74,7 +74,7 @@ export async function getScannedEmailIds(): Promise<string[]> {
  * Get high-confidence emails
  */
 export async function getHighConfidenceEmails(limit?: number): Promise<EmailRow[]> {
-  const sql = `SELECT * FROM emails WHERE confidence = 'high' AND is_job_related = 1 ORDER BY created_at DESC${limit ? ` LIMIT ${limit}` : ''}`;
+  const sql = `SELECT * FROM emails WHERE confidence = 'high' AND is_job_related = TRUE ORDER BY created_at DESC${limit ? ` LIMIT ${limit}` : ''}`;
   const result = await query<EmailRow>(sql);
   return result.rows;
 }
@@ -97,7 +97,7 @@ export async function getEmails(filters?: {
   }
   if (filters?.isJobRelated !== undefined) {
     sql += ` AND is_job_related = $${paramCount++}`;
-    params.push(filters.isJobRelated ? 1 : 0);
+    params.push(filters.isJobRelated);
   }
   sql += ' ORDER BY created_at DESC';
   if (filters?.limit) {
@@ -144,7 +144,7 @@ export async function getEmailStats(): Promise<{
  */
 export async function markEmailAsProcessed(gmailId: string): Promise<void> {
   await query(
-    'UPDATE emails SET processed = 1 WHERE gmail_id = $1',
+    'UPDATE emails SET processed = TRUE WHERE gmail_id = $1',
     [gmailId]
   );
 }
@@ -157,7 +157,7 @@ export async function markEmailsAsProcessed(gmailIds: string[]): Promise<void> {
 
   const placeholders = gmailIds.map((_, i) => `$${i + 1}`).join(',');
   await query(
-    `UPDATE emails SET processed = 1 WHERE gmail_id IN (${placeholders})`,
+    `UPDATE emails SET processed = TRUE WHERE gmail_id IN (${placeholders})`,
     gmailIds
   );
 }
@@ -166,7 +166,7 @@ export async function markEmailsAsProcessed(gmailIds: string[]): Promise<void> {
  * Get unprocessed emails
  */
 export async function getUnprocessedEmails(limit?: number): Promise<EmailRow[]> {
-  let sql = 'SELECT * FROM emails WHERE processed = 0 ORDER BY created_at DESC';
+  let sql = 'SELECT * FROM emails WHERE processed = FALSE ORDER BY created_at DESC';
   if (limit) {
     sql += ` LIMIT ${limit}`;
   }

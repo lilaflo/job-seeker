@@ -137,7 +137,7 @@ export async function getJobsWithEmbeddings(): Promise<Array<{ id: number; title
     SELECT id, title, embedding::text as embedding
     FROM jobs
     WHERE embedding IS NOT NULL
-      AND blacklisted = 0
+      AND blacklisted = FALSE
   `);
   return result.rows;
 }

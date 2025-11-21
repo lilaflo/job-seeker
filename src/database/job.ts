@@ -164,21 +164,21 @@ export async function deleteJob(jobId: number): Promise<boolean> {
  * Mark job as blacklisted
  */
 export async function markJobBlacklisted(jobId: number, blacklisted: boolean): Promise<void> {
-  await query('UPDATE jobs SET blacklisted = $1 WHERE id = $2', [blacklisted ? 1 : 0, jobId]);
+  await query('UPDATE jobs SET blacklisted = $1 WHERE id = $2', [blacklisted, jobId]);
 }
 
 /**
  * Reset all jobs blacklisted status
  */
 export async function resetAllJobsBlacklisted(): Promise<void> {
-  await query('UPDATE jobs SET blacklisted = 0');
+  await query('UPDATE jobs SET blacklisted = FALSE');
 }
 
 /**
  * Get blacklisted job count
  */
 export async function getBlacklistedJobCount(): Promise<number> {
-  const result = await query('SELECT COUNT(*) as count FROM jobs WHERE blacklisted = 1');
+  const result = await query('SELECT COUNT(*) as count FROM jobs WHERE blacklisted = TRUE');
   return parseInt(result.rows[0].count) || 0;
 }
 

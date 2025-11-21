@@ -98,7 +98,7 @@ export async function updatePlatformCrawlability(
 ): Promise<void> {
   await query(
     'UPDATE platforms SET can_crawl = $1, skip_reason = $2 WHERE hostname = $3',
-    [canCrawl ? 1 : 0, skipReason || null, domain]
+    [canCrawl, skipReason || null, domain]
   );
 }
 
