@@ -78,7 +78,17 @@ async function main() {
         };
 
         // Persist to database immediately after categorization
-        await saveEmail(categorizedEmail, category, body);
+        await saveEmail(
+          email.id,
+          email.subject || null,
+          email.from || null,
+          body,
+          category.confidence,
+          category.isJobRelated,
+          category.reason,
+          undefined, // platformId
+          body // rawSource - store the raw HTML for re-processing
+        );
 
         // Mark email as processed to prevent reprocessing
         await markEmailAsProcessed(categorizedEmail.id);

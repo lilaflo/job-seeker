@@ -39,11 +39,12 @@ export async function saveEmail(
   confidence: 'high' | 'medium' | 'low',
   isJobRelated: boolean,
   reason: string | null,
-  platformId?: number
+  platformId?: number,
+  rawSource?: string | null
 ): Promise<number> {
   const result = await query<{ id: number }>(
-    `INSERT INTO emails (gmail_id, subject, from_address, body, confidence, is_job_related, reason, platform_id, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+    `INSERT INTO emails (gmail_id, subject, from_address, body, confidence, is_job_related, reason, platform_id, raw_source, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
      ON CONFLICT (gmail_id)
      DO UPDATE SET
        subject = EXCLUDED.subject,
@@ -53,9 +54,10 @@ export async function saveEmail(
        is_job_related = EXCLUDED.is_job_related,
        reason = EXCLUDED.reason,
        platform_id = EXCLUDED.platform_id,
+       raw_source = COALESCE(EXCLUDED.raw_source, emails.raw_source),
        scanned_at = NOW()
      RETURNING id`,
-    [gmailId, subject, fromAddress, body, confidence, isJobRelated ? 1 : 0, reason, platformId || null]
+    [gmailId, subject, fromAddress, body, confidence, isJobRelated ? 1 : 0, reason, platformId || null, rawSource || null]
   );
   return result.rows[0].id;
 }

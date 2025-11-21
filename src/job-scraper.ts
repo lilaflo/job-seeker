@@ -748,7 +748,6 @@ export async function scrapeJobPage(url: string, model?: string): Promise<{
   description: string;
   title: string | null;
   salary: SalaryInfo;
-  raw_source: string | null;
   error: string | null;
 }> {
   try {
@@ -770,7 +769,6 @@ export async function scrapeJobPage(url: string, model?: string): Promise<{
         description: '',
         title,
         salary,
-        raw_source: html,
         error: 'Could not extract meaningful job description',
       };
     }
@@ -779,7 +777,6 @@ export async function scrapeJobPage(url: string, model?: string): Promise<{
       description,
       title,
       salary,
-      raw_source: html,
       error: null,
     };
   } catch (error) {
@@ -787,7 +784,6 @@ export async function scrapeJobPage(url: string, model?: string): Promise<{
       description: '',
       title: null,
       salary: { min: null, max: null, currency: null, period: null },
-      raw_source: null,
       error: error instanceof Error ? error.message : String(error),
     };
   }

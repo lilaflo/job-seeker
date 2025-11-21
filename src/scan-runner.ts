@@ -167,7 +167,9 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
         body,
         category.confidence,
         category.isJobRelated,
-        category.reason
+        category.reason,
+        undefined, // platformId
+        body // rawSource - store the raw HTML for re-processing
       );
 
       // Mark email as processed to prevent reprocessing
