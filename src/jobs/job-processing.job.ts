@@ -57,8 +57,8 @@ export async function processJobProcessingJob(
       const scraped = await scrapeJobPage(url, ollamaModel);
 
       if (!scraped.error && scraped.description && scraped.description.length >= 100) {
-        // Save job with description and salary
-        await saveJobAsync(title, url, emailId ?? undefined, scraped.salary, scraped.description);
+        // Save job with description, salary, and raw HTML source
+        await saveJobAsync(title, url, emailId ?? undefined, scraped.salary, scraped.description, scraped.raw_source);
         scrapedDescription = scraped.description;
         hasDescription = true;
       }

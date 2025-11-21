@@ -42,7 +42,8 @@ export async function saveJobAsync(
   link: string,
   emailId?: number,
   salary?: { min: number | null; max: number | null; currency: string | null; period: string | null } | null,
-  description?: string | null
+  description?: string | null,
+  rawSource?: string | null
 ): Promise<{ id: number; isNew: boolean }> {
   // First check if job exists
   const existingJob = await query<{ id: number }>(
@@ -52,8 +53,8 @@ export async function saveJobAsync(
   const isNew = existingJob.rows.length === 0;
 
   const result = await query<{ id: number }>(
-    `INSERT INTO jobs (title, link, email_id, salary_min, salary_max, salary_currency, salary_period, description, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+    `INSERT INTO jobs (title, link, email_id, salary_min, salary_max, salary_currency, salary_period, description, raw_source, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
      ON CONFLICT (link)
      DO UPDATE SET
        title = EXCLUDED.title,
@@ -63,6 +64,7 @@ export async function saveJobAsync(
        salary_currency = COALESCE(EXCLUDED.salary_currency, jobs.salary_currency),
        salary_period = COALESCE(EXCLUDED.salary_period, jobs.salary_period),
        description = COALESCE(EXCLUDED.description, jobs.description),
+       raw_source = COALESCE(EXCLUDED.raw_source, jobs.raw_source),
        scanned_at = NOW()
      RETURNING id`,
     [
@@ -74,6 +76,7 @@ export async function saveJobAsync(
       salary?.currency || null,
       salary?.period || null,
       description || null,
+      rawSource || null,
     ]
   );
   return { id: result.rows[0].id, isNew };
