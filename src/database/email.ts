@@ -122,7 +122,7 @@ export async function getEmailStats(): Promise<{
   const result = await query(`
     SELECT
       COUNT(*) as total,
-      SUM(CASE WHEN is_job_related = 1 THEN 1 ELSE 0 END) as job_related,
+      SUM(CASE WHEN is_job_related = TRUE THEN 1 ELSE 0 END) as job_related,
       SUM(CASE WHEN confidence = 'high' THEN 1 ELSE 0 END) as high_confidence,
       SUM(CASE WHEN confidence = 'medium' THEN 1 ELSE 0 END) as medium_confidence,
       SUM(CASE WHEN confidence = 'low' THEN 1 ELSE 0 END) as low_confidence

@@ -257,7 +257,7 @@ describe.skip('Job filtering and sorting', () => {
 describe.skip('Platform filtering', () => {
   it('should be able to filter crawlable platforms', () => {
     const mockPlatforms = (getPlatforms as ReturnType<typeof vi.fn>)();
-    const crawlable = mockPlatforms.filter((p: any) => p.can_crawl === 1);
+    const crawlable = mockPlatforms.filter((p: any) => p.can_crawl === true);
 
     expect(crawlable).toHaveLength(1);
     expect(crawlable[0].platform_name).toBe('Indeed');
@@ -265,7 +265,7 @@ describe.skip('Platform filtering', () => {
 
   it('should be able to filter non-crawlable platforms', () => {
     const mockPlatforms = (getPlatforms as ReturnType<typeof vi.fn>)();
-    const nonCrawlable = mockPlatforms.filter((p: any) => p.can_crawl === 0);
+    const nonCrawlable = mockPlatforms.filter((p: any) => p.can_crawl === false);
 
     expect(nonCrawlable).toHaveLength(1);
     expect(nonCrawlable[0].platform_name).toBe('LinkedIn');

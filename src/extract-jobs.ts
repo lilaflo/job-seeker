@@ -22,10 +22,7 @@ import {
 } from "./url-extractor";
 import { scrapeJobPage } from "./job-scraper";
 import { checkOllamaAvailability, getBestModel } from "./email-categorizer";
-import {
-  getJobsWithoutEmbeddings,
-  getEmbeddingStats,
-} from "./embeddings";
+import { getJobsWithoutEmbeddings, getEmbeddingStats } from "./embeddings";
 import {
   enqueueEmbeddingJobs,
   getQueueStats,
@@ -147,7 +144,9 @@ Keep the summary professional, clear, and under 500 words. Only include sections
     return response.response.trim();
   } catch (error) {
     console.debug(
-      `  ✗ Failed to create description from email: ${error instanceof Error ? error.message : String(error)}`
+      `  ✗ Failed to create description from email: ${
+        error instanceof Error ? error.message : String(error)
+      }`
     );
     return null;
   }
@@ -190,7 +189,10 @@ async function fetchJobDescription(
     console.debug(
       `  ✗ Error: ${error instanceof Error ? error.message : String(error)}`
     );
-    return { description: null, salary: { min: null, max: null, currency: null, period: null } };
+    return {
+      description: null,
+      salary: { min: null, max: null, currency: null, period: null },
+    };
   }
 }
 
@@ -205,13 +207,14 @@ async function main() {
       const ollamaAvailable = await checkOllamaAvailability();
 
       if (!ollamaAvailable) {
-        logger.error('Ollama is not available. Disabling description fetching. To enable: Start Ollama with "ollama serve"', { source: 'extract-jobs' });
+        logger.error(
+          'Ollama is not available. Disabling description fetching. To enable: Start Ollama with "ollama serve"',
+          { source: "extract-jobs" }
+        );
         console.error(
           "✗ Ollama is not available. Disabling description fetching."
         );
-        console.error(
-          '  To enable: Start Ollama with "ollama serve"'
-        );
+        console.error('  To enable: Start Ollama with "ollama serve"');
       } else {
         model = await getBestModel();
         console.log(`Using Ollama model: ${model}`);
@@ -225,7 +228,7 @@ async function main() {
     }
 
     // Fetch high-confidence job-related emails from database
-    const emails = getHighConfidenceEmails();
+    const emails = await getHighConfidenceEmails();
 
     if (emails.length === 0) {
       console.log("✓ No high-confidence job-related emails found in database.");
@@ -288,7 +291,7 @@ async function main() {
         const url = uniqueUrls[i];
 
         // Check if job already scanned
-        if (isJobScanned(url)) {
+        if (await isJobScanned(url)) {
           continue;
         }
 
@@ -297,27 +300,30 @@ async function main() {
           uniqueUrls.length > 1 ? `${baseTitle} (${i + 1})` : baseTitle;
 
         // Check if platform can be crawled
-        const isCrawlable = canCrawlUrl(url);
+        const isCrawlable = await canCrawlUrl(url);
 
         if (!isCrawlable) {
           // Non-crawlable platform - create description from email if enabled
-          const platform = getPlatformByDomain(url);
-          const skipReason = getSkipReason(url);
+          const platform = await getPlatformByDomain(url);
+          const skipReason = await getSkipReason(url);
 
           if (platform && skipReason) {
             platformSkipReasons.set(platform.platform_name, skipReason);
+          } else {
+            platformSkipReasons.set("Unknown", skipReason || "Unknown reason");
           }
 
           let description: string | undefined = undefined;
 
           if (FETCH_DESCRIPTIONS && model && email.body) {
             progressBar.stop();
-            description = await createDescriptionFromEmail(
-              email.body,
-              title,
-              url,
-              model
-            ) || undefined;
+            description =
+              (await createDescriptionFromEmail(
+                email.body,
+                title,
+                url,
+                model
+              )) || undefined;
             progressBar.start(emails.length, currentEmailIndex);
 
             if (description) {
@@ -380,10 +386,18 @@ async function main() {
     if (nonCrawlableSkipped > 0) {
       console.log(`\nNon-crawlable jobs saved: ${nonCrawlableSkipped}`);
       if (emailDescriptionsCount > 0) {
-        console.log(`  - With AI-generated descriptions from email: ${emailDescriptionsCount}`);
-        console.log(`  - Without descriptions: ${nonCrawlableSkipped - emailDescriptionsCount}`);
+        console.log(
+          `  - With AI-generated descriptions from email: ${emailDescriptionsCount}`
+        );
+        console.log(
+          `  - Without descriptions: ${
+            nonCrawlableSkipped - emailDescriptionsCount
+          }`
+        );
       } else {
-        console.log(`  - (No descriptions - enable FETCH_DESCRIPTIONS to generate from email)`);
+        console.log(
+          `  - (No descriptions - enable FETCH_DESCRIPTIONS to generate from email)`
+        );
       }
       platformSkipReasons.forEach((reason, platformName) => {
         console.log(`  - ${platformName}: ${reason}`);
@@ -401,7 +415,9 @@ async function main() {
         console.log(`  - From email content: ${emailDescriptionsCount}`);
       }
       if (descriptionsCount < newJobsCount) {
-        console.log(`  - Failed to generate: ${newJobsCount - descriptionsCount}`);
+        console.log(
+          `  - Failed to generate: ${newJobsCount - descriptionsCount}`
+        );
       }
     }
 
@@ -411,34 +427,36 @@ async function main() {
 
       const allJobs = getJobs();
       // Filter to jobs without descriptions AND from crawlable platforms only
-      const jobsToProcess = allJobs.filter(
-        (job) => {
-          const hasNoDescription = !job.description || job.description.length < 100;
-          const isCrawlable = canCrawlUrl(job.link);
-          return hasNoDescription && isCrawlable;
-        }
-      );
+      const jobsToProcess = (await allJobs).filter((job) => {
+        const hasNoDescription =
+          !job.description || job.description.length < 100;
+        const isCrawlable = canCrawlUrl(job.link);
+        return hasNoDescription && isCrawlable;
+      });
 
       // Count non-crawlable jobs without descriptions (for informational purposes)
-      const nonCrawlableWithoutDesc = allJobs.filter(
-        (job) => {
-          const hasNoDescription = !job.description || job.description.length < 100;
-          const isCrawlable = canCrawlUrl(job.link);
-          return hasNoDescription && !isCrawlable;
-        }
-      ).length;
+      const nonCrawlableWithoutDesc = (await allJobs).filter((job) => {
+        const hasNoDescription =
+          !job.description || job.description.length < 100;
+        const isCrawlable = canCrawlUrl(job.link);
+        return hasNoDescription && !isCrawlable;
+      }).length;
 
       if (jobsToProcess.length === 0 && nonCrawlableWithoutDesc === 0) {
         console.log("✓ All crawlable jobs already have descriptions.");
       } else if (jobsToProcess.length === 0) {
         console.log(`✓ All crawlable jobs already have descriptions.`);
-        console.log(`  (${nonCrawlableWithoutDesc} non-crawlable jobs without descriptions - skipped)`);
+        console.log(
+          `  (${nonCrawlableWithoutDesc} non-crawlable jobs without descriptions - skipped)`
+        );
       } else {
         console.log(
           `Found ${jobsToProcess.length} crawlable jobs without descriptions. Processing...\n`
         );
         if (nonCrawlableWithoutDesc > 0) {
-          console.debug(`  (Skipping ${nonCrawlableWithoutDesc} non-crawlable jobs)\n`);
+          console.debug(
+            `  (Skipping ${nonCrawlableWithoutDesc} non-crawlable jobs)\n`
+          );
         }
 
         const processBar = new cliProgress.SingleBar({
@@ -459,13 +477,21 @@ async function main() {
 
           if (result.description) {
             // Convert null to undefined for salary fields
-            const salary = result.salary ? {
-              min: result.salary.min ?? undefined,
-              max: result.salary.max ?? undefined,
-              currency: result.salary.currency ?? undefined,
-              period: result.salary.period ?? undefined,
-            } : undefined;
-            saveJob(job.title, job.link, job.email_id ?? undefined, salary, result.description);
+            const salary = result.salary
+              ? {
+                  min: result.salary.min ?? undefined,
+                  max: result.salary.max ?? undefined,
+                  currency: result.salary.currency ?? undefined,
+                  period: result.salary.period ?? undefined,
+                }
+              : undefined;
+            saveJob(
+              job.title,
+              job.link,
+              job.email_id ?? undefined,
+              salary,
+              result.description
+            );
             processSuccessCount++;
           } else {
             processFailureCount++;
@@ -487,14 +513,14 @@ async function main() {
     }
 
     // Database statistics
-    const stats = getJobStats();
+    const stats = await getJobStats();
     console.log("\n--- Database Statistics ---");
     console.log(`Total jobs in database: ${stats.total}`);
 
     // Queue embeddings for jobs without them
     console.log("\n=== Queueing Job Embeddings ===\n");
 
-    const jobsToEmbed = getJobsWithoutEmbeddings();
+    const jobsToEmbed = await getJobsWithoutEmbeddings();
 
     if (jobsToEmbed.length === 0) {
       console.log("✓ All jobs already have embeddings.");
@@ -503,7 +529,9 @@ async function main() {
       const redisAvailable = await checkRedisConnection();
 
       if (redisAvailable) {
-        console.log(`Found ${jobsToEmbed.length} jobs without embeddings. Queueing...\n`);
+        console.log(
+          `Found ${jobsToEmbed.length} jobs without embeddings. Queueing...\n`
+        );
 
         // Enqueue all jobs
         const enqueuedCount = await enqueueEmbeddingJobs(jobsToEmbed);
@@ -520,15 +548,23 @@ async function main() {
 
         console.log("\nTo process the queue, run: pnpm worker");
       } else {
-        logger.error('Redis is not available. Cannot queue embedding jobs. Start Redis with: pnpm redis:start', { source: 'extract-jobs', context: { pendingJobs: jobsToEmbed.length } });
+        logger.error(
+          "Redis is not available. Cannot queue embedding jobs. Start Redis with: pnpm redis:start",
+          {
+            source: "extract-jobs",
+            context: { pendingJobs: jobsToEmbed.length },
+          }
+        );
         console.error("✗ Redis is not available. Cannot queue embedding jobs.");
         console.error("  Start Redis with: pnpm redis:start");
-        console.log(`  ${jobsToEmbed.length} jobs need embeddings but were not queued.`);
+        console.log(
+          `  ${jobsToEmbed.length} jobs need embeddings but were not queued.`
+        );
       }
     }
 
     // Final embedding statistics
-    const embedStats = getEmbeddingStats();
+    const embedStats = await getEmbeddingStats();
     console.log("\n--- Embedding Statistics ---");
     console.log(`Total jobs: ${embedStats.total}`);
     console.log(`With embeddings: ${embedStats.withEmbeddings}`);
@@ -540,7 +576,7 @@ async function main() {
     await closeQueues();
     closeDatabase();
   } catch (error) {
-    logger.errorFromException(error, { source: 'extract-jobs' });
+    logger.errorFromException(error, { source: "extract-jobs" });
     console.error(
       "\n✗ Error:",
       error instanceof Error ? error.message : String(error)

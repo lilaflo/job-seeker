@@ -77,7 +77,7 @@ export async function getPlatformIdFromEmail(emailAddress: string): Promise<numb
 export async function canCrawlUrl(url: string): Promise<boolean> {
   const platform = await getPlatformByDomain(url);
   if (!platform) return true; // Allow crawling unknown platforms
-  return platform.can_crawl === 1;
+  return platform.can_crawl === true;
 }
 
 /**
@@ -113,8 +113,8 @@ export async function getPlatformStats(): Promise<{
   const result = await query(`
     SELECT
       COUNT(*) as total,
-      SUM(CASE WHEN can_crawl = 1 THEN 1 ELSE 0 END) as crawlable,
-      SUM(CASE WHEN can_crawl = 0 THEN 1 ELSE 0 END) as non_crawlable
+      SUM(CASE WHEN can_crawl = TRUE THEN 1 ELSE 0 END) as crawlable,
+      SUM(CASE WHEN can_crawl = FALSE THEN 1 ELSE 0 END) as non_crawlable
     FROM platforms
   `);
 

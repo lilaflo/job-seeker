@@ -219,12 +219,12 @@ describe.skip("processBlacklistEmbeddingJob", () => {
     const testEmbedding = new Array(768).fill(0.5);
     mockGenerateEmbedding.mockResolvedValue(testEmbedding);
 
-    // Verify SQL query includes WHERE blacklisted = 0
+    // Verify SQL query includes WHERE blacklisted = FALSE
     mockAll.mockReturnValue([]);
 
     await processBlacklistEmbeddingJob(job);
 
     const sqlQuery = mockPrepare.mock.calls[0][0];
-    expect(sqlQuery).toContain("WHERE j.blacklisted = 0");
+    expect(sqlQuery).toContain("WHERE j.blacklisted = FALSE");
   });
 });

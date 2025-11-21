@@ -122,7 +122,7 @@ export async function getJobs(filters?: {
     params.push(filters.emailId);
   }
   if (!filters?.includeBlacklisted) {
-    sql += ' AND jobs.blacklisted = 0';
+    sql += ' AND jobs.blacklisted = FALSE';
   }
   sql += ' ORDER BY jobs.created_at DESC';
   if (filters?.limit) {
