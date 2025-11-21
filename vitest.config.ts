@@ -7,8 +7,8 @@ export default defineConfig({
     exclude: ["**/node_modules/**", "**/dist/**"],
     env: {
       NODE_ENV: "test",
-      OLLAMA_EMBEDDING_MODEL: "hf.co/Mungert/all-MiniLM-L6-v2-GGUF",
-      OLLAMA_EMBEDDING_DIM: "384",
+      OLLAMA_EMBEDDING_MODEL: "paraphrase-multilingual:278m-mpnet-base-v2-fp16",
+      OLLAMA_EMBEDDING_DIM: "768",
     },
     coverage: {
       provider: "v8",
