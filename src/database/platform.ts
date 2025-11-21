@@ -55,20 +55,74 @@ export async function getPlatformByDomain(url: string): Promise<PlatformRow | nu
 
 /**
  * Get platform ID from email address
+ * Handles both direct emails and forwarded emails (e.g., through lale.li)
  */
 export async function getPlatformIdFromEmail(emailAddress: string): Promise<number | null> {
-  const domain = emailAddress.split('@')[1]?.toLowerCase();
-  if (!domain) return null;
+  // Extract direct domain from email address
+  const directDomain = emailAddress.split('@')[1]?.toLowerCase();
+  if (!directDomain) return null;
 
-  const parts = domain.split('.');
-  const domainWithoutTld = parts.length > 1 ? parts[0] : domain;
+  // Try direct domain first (e.g., jobalerts-noreply@linkedin.com)
+  const directParts = directDomain.split('.');
+  const directDomainWithoutTld = directParts.length > 1 ? directParts[0] : directDomain;
 
-  const result = await query<{ id: number }>(
+  let result = await query<{ id: number }>(
     'SELECT id FROM platforms WHERE hostname = $1',
-    [domainWithoutTld]
+    [directDomainWithoutTld]
   );
 
-  return result.rows[0]?.id || null;
+  if (result.rows.length > 0) {
+    return result.rows[0].id;
+  }
+
+  // Handle forwarded emails - try to extract original domain from display name
+  // Example: "Indeed - alert(a)indeed.com" <indeed+do-not-reply=indeed.com@lale.li>
+  // Example: "jobs.ch Notification - notification(a)my.jobs.ch" - extract "jobs"
+  const displayNameMatch = emailAddress.match(/\(a\)([^@\s">]+)/);
+  if (displayNameMatch) {
+    const originalDomain = displayNameMatch[1].toLowerCase();
+    const parts = originalDomain.split('.');
+    // Extract second-level domain (the part before TLD)
+    // For "my.jobs.ch", we want "jobs", not "my"
+    // For "indeed.com", we want "indeed"
+    const domainWithoutTld = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
+
+    result = await query<{ id: number }>(
+      'SELECT id FROM platforms WHERE hostname = $1',
+      [domainWithoutTld]
+    );
+
+    if (result.rows.length > 0) {
+      return result.rows[0].id;
+    }
+  }
+
+  // Handle forwarded emails - try to extract from local part before forwarding domain
+  // Example: indeed+do-not-reply=indeed.com@lale.li → indeed.com → "indeed"
+  // Example: chjobs+reply=my.jobs.ch@lale.li → my.jobs.ch → "jobs"
+  const emailParts = emailAddress.match(/<([^@]+)@/);
+  if (emailParts) {
+    const localPart = emailParts[1];
+    // Look for pattern: prefix=originaldomain.tld
+    const forwardedMatch = localPart.match(/=([^=]+\.[^=]+)$/);
+    if (forwardedMatch) {
+      const originalDomain = forwardedMatch[1].toLowerCase();
+      const parts = originalDomain.split('.');
+      // Extract second-level domain (the part before TLD)
+      const domainWithoutTld = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
+
+      result = await query<{ id: number }>(
+        'SELECT id FROM platforms WHERE hostname = $1',
+        [domainWithoutTld]
+      );
+
+      if (result.rows.length > 0) {
+        return result.rows[0].id;
+      }
+    }
+  }
+
+  return null;
 }
 
 /**

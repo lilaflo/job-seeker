@@ -154,6 +154,7 @@ INSERT INTO platforms (platform_name, hostname, can_crawl, skip_reason) VALUES
   ('Twago', 'twago', TRUE, NULL),
   ('Malt', 'malt', TRUE, NULL),
   ('Xing', 'xing', TRUE, NULL),
+  ('Experteer', 'experteer', TRUE, NULL),
   ('StepStone', 'stepstone', TRUE, NULL),
   ('Jobware', 'jobware', TRUE, NULL),
   ('Jobscout24', 'jobscout24', TRUE, NULL),
