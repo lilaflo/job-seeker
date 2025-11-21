@@ -13,6 +13,7 @@ import {
   updateBlacklistKeywordEmbedding,
   getJobEmbedding,
   cosineSimilarity,
+  EMBEDDING_MODEL,
 } from '../embeddings';
 import {
   markJobBlacklisted,
@@ -47,7 +48,7 @@ export async function processBlacklistEmbeddingJob(
 
     // Save embedding to database
     try {
-      await updateBlacklistKeywordEmbedding(blacklistId, embedding);
+      await updateBlacklistKeywordEmbedding(blacklistId, embedding, EMBEDDING_MODEL);
       console.debug(`  ✓ Embedding saved for "${keyword}"`);
     } catch (error) {
       logger.errorFromException(error, {

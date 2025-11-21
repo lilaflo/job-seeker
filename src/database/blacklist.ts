@@ -28,12 +28,19 @@ export async function saveBlacklistKeywordWithoutEmbedding(keyword: string): Pro
 /**
  * Update blacklist keyword embedding
  */
-export async function updateBlacklistKeywordEmbedding(blacklistId: number, embedding: number[]): Promise<void> {
+export async function updateBlacklistKeywordEmbedding(blacklistId: number, embedding: number[], model?: string): Promise<void> {
   const vectorString = `[${embedding.join(',')}]`;
-  await query(
-    'UPDATE blacklist SET embedding = $1::vector WHERE id = $2',
-    [vectorString, blacklistId]
-  );
+  if (model) {
+    await query(
+      'UPDATE blacklist SET embedding = $1::vector, embedding_model = $2 WHERE id = $3',
+      [vectorString, model, blacklistId]
+    );
+  } else {
+    await query(
+      'UPDATE blacklist SET embedding = $1::vector WHERE id = $2',
+      [vectorString, blacklistId]
+    );
+  }
 }
 
 /**

@@ -25,7 +25,7 @@ import {
 import { getOllamaClient, isModelAvailable } from '../ollama-client';
 
 // Embedding model configuration
-const EMBEDDING_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || 'hf.co/Mungert/all-MiniLM-L6-v2-GGUF';
+export const EMBEDDING_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || 'hf.co/Mungert/all-MiniLM-L6-v2-GGUF';
 const EMBEDDING_DIM = process.env.OLLAMA_EMBEDDING_DIM ? parseInt(process.env.OLLAMA_EMBEDDING_DIM, 10) : 384;
 
 /**
