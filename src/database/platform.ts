@@ -55,70 +55,31 @@ export async function getPlatformByDomain(url: string): Promise<PlatformRow | nu
 
 /**
  * Get platform ID from email address
- * Handles both direct emails and forwarded emails (e.g., through lale.li)
+ * Extracts all domain-like patterns and tries to match them against platforms
  */
 export async function getPlatformIdFromEmail(emailAddress: string): Promise<number | null> {
-  // Extract direct domain from email address
-  const directDomain = emailAddress.split('@')[1]?.toLowerCase();
-  if (!directDomain) return null;
+  // Extract all domain patterns from the email address
+  // Matches: word.word or word.word.word (ignoring forwarding services)
+  const domainPattern = /([a-z0-9-]+)\.([a-z0-9-]+(?:\.[a-z]{2,})?)/gi;
+  const matches = emailAddress.toLowerCase().matchAll(domainPattern);
 
-  // Try direct domain first (e.g., jobalerts-noreply@linkedin.com)
-  const directParts = directDomain.split('.');
-  const directDomainWithoutTld = directParts.length > 1 ? directParts[0] : directDomain;
+  // Try each extracted domain
+  for (const match of matches) {
+    const fullDomain = match[0]; // e.g., "indeed.com", "my.jobs.ch"
+    const parts = fullDomain.split('.');
 
-  let result = await query<{ id: number }>(
-    'SELECT id FROM platforms WHERE hostname = $1',
-    [directDomainWithoutTld]
-  );
-
-  if (result.rows.length > 0) {
-    return result.rows[0].id;
-  }
-
-  // Handle forwarded emails - try to extract original domain from display name
-  // Example: "Indeed - alert(a)indeed.com" <indeed+do-not-reply=indeed.com@lale.li>
-  // Example: "jobs.ch Notification - notification(a)my.jobs.ch" - extract "jobs"
-  const displayNameMatch = emailAddress.match(/\(a\)([^@\s">]+)/);
-  if (displayNameMatch) {
-    const originalDomain = displayNameMatch[1].toLowerCase();
-    const parts = originalDomain.split('.');
     // Extract second-level domain (the part before TLD)
-    // For "my.jobs.ch", we want "jobs", not "my"
-    // For "indeed.com", we want "indeed"
+    // For "indeed.com" → "indeed"
+    // For "my.jobs.ch" → "jobs"
     const domainWithoutTld = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
 
-    result = await query<{ id: number }>(
+    const result = await query<{ id: number }>(
       'SELECT id FROM platforms WHERE hostname = $1',
       [domainWithoutTld]
     );
 
     if (result.rows.length > 0) {
       return result.rows[0].id;
-    }
-  }
-
-  // Handle forwarded emails - try to extract from local part before forwarding domain
-  // Example: indeed+do-not-reply=indeed.com@lale.li → indeed.com → "indeed"
-  // Example: chjobs+reply=my.jobs.ch@lale.li → my.jobs.ch → "jobs"
-  const emailParts = emailAddress.match(/<([^@]+)@/);
-  if (emailParts) {
-    const localPart = emailParts[1];
-    // Look for pattern: prefix=originaldomain.tld
-    const forwardedMatch = localPart.match(/=([^=]+\.[^=]+)$/);
-    if (forwardedMatch) {
-      const originalDomain = forwardedMatch[1].toLowerCase();
-      const parts = originalDomain.split('.');
-      // Extract second-level domain (the part before TLD)
-      const domainWithoutTld = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
-
-      result = await query<{ id: number }>(
-        'SELECT id FROM platforms WHERE hostname = $1',
-        [domainWithoutTld]
-      );
-
-      if (result.rows.length > 0) {
-        return result.rows[0].id;
-      }
     }
   }
 
