@@ -24,9 +24,16 @@ import {
 } from '../database';
 import { getOllamaClient, isModelAvailable } from '../ollama-client';
 
-// Embedding model configuration
-export const EMBEDDING_MODEL = process.env.OLLAMA_EMBEDDING_MODEL || 'hf.co/Mungert/all-MiniLM-L6-v2-GGUF';
-const EMBEDDING_DIM = process.env.OLLAMA_EMBEDDING_DIM ? parseInt(process.env.OLLAMA_EMBEDDING_DIM, 10) : 384;
+// Embedding model configuration - require environment variables
+if (!process.env.OLLAMA_EMBEDDING_MODEL) {
+  throw new Error('OLLAMA_EMBEDDING_MODEL environment variable is required');
+}
+if (!process.env.OLLAMA_EMBEDDING_DIM) {
+  throw new Error('OLLAMA_EMBEDDING_DIM environment variable is required');
+}
+
+export const EMBEDDING_MODEL = process.env.OLLAMA_EMBEDDING_MODEL;
+const EMBEDDING_DIM = parseInt(process.env.OLLAMA_EMBEDDING_DIM, 10);
 
 /**
  * Check if the embedding model is available in Ollama
