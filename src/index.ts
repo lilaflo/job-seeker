@@ -17,6 +17,7 @@ import {
   markEmailAsProcessed,
   getEmailStats,
   closeDatabase,
+  getPlatformIdFromEmail,
 } from "./database";
 import { logger } from "./logger";
 
@@ -98,6 +99,11 @@ async function main() {
           category,
         };
 
+        // Get platform ID from email address
+        const platformId = email.from
+          ? await getPlatformIdFromEmail(email.from)
+          : null;
+
         // Persist to database immediately after categorization
         await saveEmail(
           email.id,
@@ -107,7 +113,7 @@ async function main() {
           category.confidence,
           category.isJobRelated,
           category.reason,
-          undefined, // platformId
+          platformId,
           body // rawSource - store the raw HTML for re-processing
         );
 

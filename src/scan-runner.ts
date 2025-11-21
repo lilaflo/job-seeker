@@ -6,7 +6,7 @@
 import { authorize, testGmailConnection } from './gmail-auth';
 import { fetchEmails, fetchEmailBodies, processEmailsWithProgress } from './email-scanner';
 import { checkOllamaAvailability, getBestModel, categorizeEmail, type CategorizedEmail } from './email-categorizer';
-import { getScannedEmailIds, saveEmail, markEmailAsProcessed, getEmailStats, getEmailByGmailId, saveJobAsync, isJobScanned } from './database';
+import { getScannedEmailIds, saveEmail, markEmailAsProcessed, getEmailStats, getEmailByGmailId, saveJobAsync, isJobScanned, getPlatformIdFromEmail } from './database';
 import { enqueueJobExtraction, enqueueJobProcessing, checkRedisConnection } from './queue';
 import { logger } from './logger';
 import { extractJobUrls, deduplicateUrls, extractJobTitle, extractJobsWithTitles } from './url-extractor';
@@ -159,6 +159,11 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
         category,
       };
 
+      // Get platform ID from email address
+      const platformId = email.from
+        ? await getPlatformIdFromEmail(email.from)
+        : null;
+
       // Persist to database immediately after categorization
       await saveEmail(
         email.id,
@@ -168,7 +173,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
         category.confidence,
         category.isJobRelated,
         category.reason,
-        undefined, // platformId
+        platformId,
         body // rawSource - store the raw HTML for re-processing
       );
 
