@@ -82,7 +82,10 @@ export function getDatabase(): Database.Database {
     const dbName = process.env.NODE_ENV === 'test' ? 'job-seeker.test.db' : 'job-seeker.db';
     const dbPath = path.join(process.cwd(), dbName);
     db = new Database(dbPath);
-    db.pragma('journal_mode = WAL'); // Better performance for concurrent reads
+    // Use DELETE journal mode for better cross-process compatibility
+    // WAL mode can have issues with multiple processes not properly sharing state
+    db.pragma('journal_mode = DELETE');
+    db.pragma('synchronous = FULL'); // Ensure durability with DELETE mode
   }
   return db;
 }

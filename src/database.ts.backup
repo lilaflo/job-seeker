@@ -1,0 +1,799 @@
+/**
+ * PostgreSQL Database Module with pgvector support
+ * Replaces SQLite-based database.ts
+ */
+
+import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
+import path from 'path';
+
+// Database configuration from environment
+const DB_CONFIG = {
+  host: process.env.POSTGRES_HOST || 'localhost',
+  port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
+  database: process.env.NODE_ENV === 'test' ? 'jobseeker_test' : (process.env.POSTGRES_DB || 'jobseeker'),
+  user: process.env.POSTGRES_USER || 'jobseeker',
+  password: process.env.POSTGRES_PASSWORD || 'jobseeker_dev_password',
+  max: 20, // Maximum number of clients in the pool
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+};
+
+// Types
+export interface EmailRow {
+  id: number;
+  gmail_id: string;
+  subject: string | null;
+  from_address: string | null;
+  body: string | null;
+  confidence: 'high' | 'medium' | 'low';
+  is_job_related: number;
+  reason: string | null;
+  processed: number;
+  platform_id: number | null;
+  created_at: string;
+  scanned_at: string;
+}
+
+export interface JobRow {
+  id: number;
+  title: string;
+  link: string;
+  email_id: number | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string | null;
+  salary_period: string | null;
+  created_at: string;
+  scanned_at: string;
+  description: string | null;
+  blacklisted: number;
+  processing_status: 'pending' | 'processing' | 'completed' | 'failed';
+}
+
+export interface PlatformRow {
+  id: number;
+  platform_name: string;
+  hostname: string;
+  can_crawl: number;
+  skip_reason: string | null;
+  created_at: string;
+}
+
+let pool: Pool | null = null;
+
+/**
+ * Gets or creates the PostgreSQL connection pool
+ */
+export function getPool(): Pool {
+  if (!pool) {
+    pool = new Pool(DB_CONFIG);
+
+    pool.on('error', (err) => {
+      console.error('Unexpected error on idle PostgreSQL client', err);
+    });
+
+    pool.on('connect', () => {
+      console.debug('New PostgreSQL client connected');
+    });
+  }
+  return pool;
+}
+
+/**
+ * Closes the database connection pool
+ */
+export async function closeDatabase(): Promise<void> {
+  if (pool) {
+    await pool.end();
+    pool = null;
+  }
+}
+
+/**
+ * Execute a query with parameters
+ */
+async function query<T extends QueryResultRow = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
+  const client = getPool();
+  return client.query<T>(text, params);
+}
+
+/**
+ * Get a client from the pool for transactions
+ */
+async function getClient(): Promise<PoolClient> {
+  return getPool().connect();
+}
+
+// =============================================================================
+// Email Management Functions
+// =============================================================================
+
+/**
+ * Check if an email has been scanned
+ */
+export async function isEmailScanned(gmailId: string): Promise<boolean> {
+  const result = await query<{ exists: boolean }>(
+    'SELECT EXISTS(SELECT 1 FROM emails WHERE gmail_id = $1) as exists',
+    [gmailId]
+  );
+  return result.rows[0]?.exists || false;
+}
+
+/**
+ * Save email to database
+ */
+export async function saveEmail(
+  gmailId: string,
+  subject: string | null,
+  fromAddress: string | null,
+  body: string | null,
+  confidence: 'high' | 'medium' | 'low',
+  isJobRelated: boolean,
+  reason: string | null,
+  platformId?: number
+): Promise<number> {
+  const result = await query<{ id: number }>(
+    `INSERT INTO emails (gmail_id, subject, from_address, body, confidence, is_job_related, reason, platform_id, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+     ON CONFLICT (gmail_id)
+     DO UPDATE SET
+       subject = EXCLUDED.subject,
+       from_address = EXCLUDED.from_address,
+       body = EXCLUDED.body,
+       confidence = EXCLUDED.confidence,
+       is_job_related = EXCLUDED.is_job_related,
+       reason = EXCLUDED.reason,
+       platform_id = EXCLUDED.platform_id,
+       scanned_at = NOW()
+     RETURNING id`,
+    [gmailId, subject, fromAddress, body, confidence, isJobRelated ? 1 : 0, reason, platformId || null]
+  );
+  return result.rows[0].id;
+}
+
+/**
+ * Get all scanned email IDs
+ */
+export async function getScannedEmailIds(): Promise<string[]> {
+  const result = await query<{ gmail_id: string }>('SELECT gmail_id FROM emails');
+  return result.rows.map(row => row.gmail_id);
+}
+
+/**
+ * Get high-confidence emails
+ */
+export async function getHighConfidenceEmails(limit?: number): Promise<EmailRow[]> {
+  const sql = `SELECT * FROM emails WHERE confidence = 'high' AND is_job_related = 1 ORDER BY created_at DESC${limit ? ` LIMIT ${limit}` : ''}`;
+  const result = await query<EmailRow>(sql);
+  return result.rows;
+}
+
+/**
+ * Get emails with filters
+ */
+export async function getEmails(filters?: {
+  confidence?: 'high' | 'medium' | 'low';
+  isJobRelated?: boolean;
+  limit?: number;
+}): Promise<EmailRow[]> {
+  let sql = 'SELECT * FROM emails WHERE 1=1';
+  const params: any[] = [];
+  let paramCount = 1;
+
+  if (filters?.confidence) {
+    sql += ` AND confidence = $${paramCount++}`;
+    params.push(filters.confidence);
+  }
+  if (filters?.isJobRelated !== undefined) {
+    sql += ` AND is_job_related = $${paramCount++}`;
+    params.push(filters.isJobRelated ? 1 : 0);
+  }
+  sql += ' ORDER BY created_at DESC';
+  if (filters?.limit) {
+    sql += ` LIMIT $${paramCount++}`;
+    params.push(filters.limit);
+  }
+
+  const result = await query<EmailRow>(sql, params);
+  return result.rows;
+}
+
+/**
+ * Get email statistics
+ */
+export async function getEmailStats(): Promise<{
+  total: number;
+  jobRelated: number;
+  highConfidence: number;
+  mediumConfidence: number;
+  lowConfidence: number;
+}> {
+  const result = await query(`
+    SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN is_job_related = 1 THEN 1 ELSE 0 END) as job_related,
+      SUM(CASE WHEN confidence = 'high' THEN 1 ELSE 0 END) as high_confidence,
+      SUM(CASE WHEN confidence = 'medium' THEN 1 ELSE 0 END) as medium_confidence,
+      SUM(CASE WHEN confidence = 'low' THEN 1 ELSE 0 END) as low_confidence
+    FROM emails
+  `);
+
+  const row = result.rows[0];
+  return {
+    total: parseInt(row.total) || 0,
+    jobRelated: parseInt(row.job_related) || 0,
+    highConfidence: parseInt(row.high_confidence) || 0,
+    mediumConfidence: parseInt(row.medium_confidence) || 0,
+    lowConfidence: parseInt(row.low_confidence) || 0,
+  };
+}
+
+/**
+ * Clear all emails (for testing)
+ */
+export async function clearAllEmails(): Promise<void> {
+  await query('DELETE FROM emails');
+}
+
+// =============================================================================
+// Job Management Functions
+// =============================================================================
+
+/**
+ * Check if a job link has been scanned
+ */
+export async function isJobScanned(link: string): Promise<boolean> {
+  const result = await query<{ exists: boolean }>(
+    'SELECT EXISTS(SELECT 1 FROM jobs WHERE link = $1) as exists',
+    [link]
+  );
+  return result.rows[0]?.exists || false;
+}
+
+/**
+ * Save job to database
+ */
+export function saveJob(
+  title: string,
+  link: string,
+  emailId?: number,
+  salary?: { min: number | null; max: number | null; currency: string | null; period: string | null } | null,
+  description?: string | null
+): number {
+  // Note: For PostgreSQL, we need to make this async. For now, keeping sync signature for compatibility
+  // This will be updated when we migrate the calling code
+  throw new Error('saveJob must be called with saveJobAsync for PostgreSQL');
+}
+
+/**
+ * Save job to database (async version for PostgreSQL)
+ */
+export async function saveJobAsync(
+  title: string,
+  link: string,
+  emailId?: number,
+  salary?: { min: number | null; max: number | null; currency: string | null; period: string | null } | null,
+  description?: string | null
+): Promise<number> {
+  const result = await query<{ id: number }>(
+    `INSERT INTO jobs (title, link, email_id, salary_min, salary_max, salary_currency, salary_period, description, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+     ON CONFLICT (link)
+     DO UPDATE SET
+       title = EXCLUDED.title,
+       email_id = COALESCE(EXCLUDED.email_id, jobs.email_id),
+       salary_min = COALESCE(EXCLUDED.salary_min, jobs.salary_min),
+       salary_max = COALESCE(EXCLUDED.salary_max, jobs.salary_max),
+       salary_currency = COALESCE(EXCLUDED.salary_currency, jobs.salary_currency),
+       salary_period = COALESCE(EXCLUDED.salary_period, jobs.salary_period),
+       description = COALESCE(EXCLUDED.description, jobs.description),
+       scanned_at = NOW()
+     RETURNING id`,
+    [
+      title,
+      link,
+      emailId || null,
+      salary?.min || null,
+      salary?.max || null,
+      salary?.currency || null,
+      salary?.period || null,
+      description || null,
+    ]
+  );
+  return result.rows[0].id;
+}
+
+/**
+ * Update job processing status
+ */
+export async function updateJobProcessingStatus(
+  jobId: number,
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+): Promise<void> {
+  await query('UPDATE jobs SET processing_status = $1 WHERE id = $2', [status, jobId]);
+}
+
+/**
+ * Get all scanned job links
+ */
+export async function getScannedJobLinks(): Promise<string[]> {
+  const result = await query<{ link: string }>('SELECT link FROM jobs');
+  return result.rows.map(row => row.link);
+}
+
+/**
+ * Get jobs with filters
+ */
+export async function getJobs(filters?: {
+  emailId?: number;
+  limit?: number;
+  includeBlacklisted?: boolean;
+}): Promise<JobRow[]> {
+  let sql = 'SELECT * FROM jobs WHERE 1=1';
+  const params: any[] = [];
+  let paramCount = 1;
+
+  if (filters?.emailId) {
+    sql += ` AND email_id = $${paramCount++}`;
+    params.push(filters.emailId);
+  }
+  if (!filters?.includeBlacklisted) {
+    sql += ' AND blacklisted = 0';
+  }
+  sql += ' ORDER BY created_at DESC';
+  if (filters?.limit) {
+    sql += ` LIMIT $${paramCount++}`;
+    params.push(filters.limit);
+  }
+
+  const result = await query<JobRow>(sql, params);
+  return result.rows;
+}
+
+/**
+ * Get job statistics
+ */
+export async function getJobStats(): Promise<{ total: number }> {
+  const result = await query('SELECT COUNT(*) as total FROM jobs');
+  return {
+    total: parseInt(result.rows[0].total) || 0,
+  };
+}
+
+/**
+ * Get job by ID
+ */
+export async function getJobById(jobId: number): Promise<JobRow | null> {
+  const result = await query<JobRow>('SELECT * FROM jobs WHERE id = $1', [jobId]);
+  return result.rows[0] || null;
+}
+
+/**
+ * Delete job by ID
+ */
+export async function deleteJob(jobId: number): Promise<boolean> {
+  const result = await query('DELETE FROM jobs WHERE id = $1', [jobId]);
+  return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * Mark job as blacklisted
+ */
+export async function markJobBlacklisted(jobId: number, blacklisted: boolean): Promise<void> {
+  await query('UPDATE jobs SET blacklisted = $1 WHERE id = $2', [blacklisted ? 1 : 0, jobId]);
+}
+
+/**
+ * Reset all jobs blacklisted status
+ */
+export async function resetAllJobsBlacklisted(): Promise<void> {
+  await query('UPDATE jobs SET blacklisted = 0');
+}
+
+/**
+ * Get blacklisted job count
+ */
+export async function getBlacklistedJobCount(): Promise<number> {
+  const result = await query('SELECT COUNT(*) as count FROM jobs WHERE blacklisted = 1');
+  return parseInt(result.rows[0].count) || 0;
+}
+
+/**
+ * Clear all jobs (for testing)
+ */
+export async function clearAllJobs(): Promise<void> {
+  await query('DELETE FROM jobs');
+}
+
+// =============================================================================
+// Platform Management Functions
+// =============================================================================
+
+/**
+ * Get all platforms
+ */
+export async function getPlatforms(): Promise<PlatformRow[]> {
+  const result = await query<PlatformRow>('SELECT * FROM platforms ORDER BY platform_name');
+  return result.rows;
+}
+
+/**
+ * Get platform by domain/URL
+ */
+export async function getPlatformByDomain(url: string): Promise<PlatformRow | null> {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname.toLowerCase();
+    const parts = hostname.split('.');
+
+    // Try exact match first
+    let result = await query<PlatformRow>(
+      'SELECT * FROM platforms WHERE hostname = $1',
+      [hostname]
+    );
+
+    if (result.rows.length > 0) {
+      return result.rows[0];
+    }
+
+    // Try subdomain match (e.g., jobs.linkedin.com -> linkedin)
+    if (parts.length > 2) {
+      const domain = parts[parts.length - 2];
+      result = await query<PlatformRow>(
+        'SELECT * FROM platforms WHERE hostname = $1',
+        [domain]
+      );
+
+      if (result.rows.length > 0) {
+        return result.rows[0];
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Error parsing URL:', url, error);
+    return null;
+  }
+}
+
+/**
+ * Get platform ID from email address
+ */
+export async function getPlatformIdFromEmail(emailAddress: string): Promise<number | null> {
+  const domain = emailAddress.split('@')[1]?.toLowerCase();
+  if (!domain) return null;
+
+  const parts = domain.split('.');
+  const domainWithoutTld = parts.length > 1 ? parts[0] : domain;
+
+  const result = await query<{ id: number }>(
+    'SELECT id FROM platforms WHERE hostname = $1',
+    [domainWithoutTld]
+  );
+
+  return result.rows[0]?.id || null;
+}
+
+/**
+ * Check if URL can be crawled
+ */
+export async function canCrawlUrl(url: string): Promise<boolean> {
+  const platform = await getPlatformByDomain(url);
+  if (!platform) return true; // Allow crawling unknown platforms
+  return platform.can_crawl === 1;
+}
+
+/**
+ * Get skip reason for non-crawlable URL
+ */
+export async function getSkipReason(url: string): Promise<string | null> {
+  const platform = await getPlatformByDomain(url);
+  return platform?.skip_reason || null;
+}
+
+/**
+ * Update platform crawlability
+ */
+export async function updatePlatformCrawlability(
+  domain: string,
+  canCrawl: boolean,
+  skipReason?: string
+): Promise<void> {
+  await query(
+    'UPDATE platforms SET can_crawl = $1, skip_reason = $2 WHERE hostname = $3',
+    [canCrawl ? 1 : 0, skipReason || null, domain]
+  );
+}
+
+/**
+ * Get platform statistics
+ */
+export async function getPlatformStats(): Promise<{
+  total: number;
+  crawlable: number;
+  nonCrawlable: number;
+}> {
+  const result = await query(`
+    SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN can_crawl = 1 THEN 1 ELSE 0 END) as crawlable,
+      SUM(CASE WHEN can_crawl = 0 THEN 1 ELSE 0 END) as non_crawlable
+    FROM platforms
+  `);
+
+  const row = result.rows[0];
+  return {
+    total: parseInt(row.total) || 0,
+    crawlable: parseInt(row.crawlable) || 0,
+    nonCrawlable: parseInt(row.non_crawlable) || 0,
+  };
+}
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+/**
+ * Check database connection
+ */
+export async function checkConnection(): Promise<boolean> {
+  try {
+    await query('SELECT 1');
+    return true;
+  } catch (error) {
+    console.error('Database connection check failed:', error);
+    return false;
+  }
+}
+
+/**
+ * Initialize database (enable pgvector extension)
+ */
+export async function initializeDatabase(): Promise<void> {
+  try {
+    // Enable pgvector extension
+    await query('CREATE EXTENSION IF NOT EXISTS vector');
+    console.debug('pgvector extension enabled');
+  } catch (error) {
+    console.error('Failed to initialize database:', error);
+    throw error;
+  }
+}
+
+// =============================================================================
+// Blacklist Functions
+// =============================================================================
+
+export interface BlacklistKeyword {
+  id: number;
+  keyword: string;
+  embedding: string | null; // pgvector stores as string representation
+  created_at: string;
+}
+
+/**
+ * Get all blacklist keywords
+ */
+export async function getBlacklistKeywords(): Promise<BlacklistKeyword[]> {
+  const result = await query<BlacklistKeyword>('SELECT * FROM blacklist ORDER BY keyword ASC');
+  return result.rows;
+}
+
+/**
+ * Save blacklist keyword without embedding
+ */
+export async function saveBlacklistKeywordWithoutEmbedding(keyword: string): Promise<number> {
+  const result = await query<{ id: number }>(
+    'INSERT INTO blacklist (keyword) VALUES ($1) ON CONFLICT (keyword) DO UPDATE SET keyword = EXCLUDED.keyword RETURNING id',
+    [keyword]
+  );
+  return result.rows[0].id;
+}
+
+/**
+ * Update blacklist keyword embedding
+ */
+export async function updateBlacklistKeywordEmbedding(blacklistId: number, embedding: number[]): Promise<void> {
+  const vectorString = `[${embedding.join(',')}]`;
+  await query(
+    'UPDATE blacklist SET embedding = $1::vector WHERE id = $2',
+    [vectorString, blacklistId]
+  );
+}
+
+/**
+ * Clear all blacklist keywords
+ */
+export async function clearBlacklist(): Promise<void> {
+  await query('DELETE FROM blacklist');
+}
+
+/**
+ * Get blacklist text (one keyword per line)
+ */
+export async function getBlacklistText(): Promise<string> {
+  const keywords = await getBlacklistKeywords();
+  return keywords.map(k => k.keyword).join('\n');
+}
+
+// =============================================================================
+// Job Embeddings Functions (pgvector)
+// =============================================================================
+
+/**
+ * Save job embedding using pgvector
+ */
+export async function saveJobEmbedding(jobId: number, embedding: number[], model: string): Promise<void> {
+  const vectorString = `[${embedding.join(',')}]`;
+  await query(
+    `INSERT INTO job_embeddings (job_id, embedding, model)
+     VALUES ($1, $2::vector, $3)
+     ON CONFLICT (job_id)
+     DO UPDATE SET embedding = EXCLUDED.embedding, model = EXCLUDED.model`,
+    [jobId, vectorString, model]
+  );
+}
+
+/**
+ * Get job embedding
+ */
+export async function getJobEmbedding(jobId: number): Promise<number[] | null> {
+  const result = await query<{ embedding: string }>(
+    'SELECT embedding::text FROM job_embeddings WHERE job_id = $1',
+    [jobId]
+  );
+
+  if (!result.rows[0]) return null;
+
+  // Parse pgvector string format: "[0.1,0.2,0.3,...]"
+  const embeddingString = result.rows[0].embedding;
+  const values = embeddingString.slice(1, -1).split(',').map(parseFloat);
+  return values;
+}
+
+/**
+ * Check if job has embedding
+ */
+export async function hasJobEmbedding(jobId: number): Promise<boolean> {
+  const result = await query<{ exists: boolean }>(
+    'SELECT EXISTS(SELECT 1 FROM job_embeddings WHERE job_id = $1) as exists',
+    [jobId]
+  );
+  return result.rows[0]?.exists || false;
+}
+
+/**
+ * Get jobs without embeddings
+ */
+export async function getJobsWithoutEmbeddings(): Promise<Array<{ id: number; title: string; description: string | null }>> {
+  const result = await query<{ id: number; title: string; description: string | null }>(`
+    SELECT j.id, j.title, j.description
+    FROM jobs j
+    LEFT JOIN job_embeddings e ON j.id = e.job_id
+    WHERE e.job_id IS NULL
+  `);
+  return result.rows;
+}
+
+/**
+ * Search similar jobs using pgvector cosine similarity
+ */
+export async function searchSimilarJobsPG(
+  queryEmbedding: number[],
+  limit: number = 20,
+  minSimilarity: number = 0.3
+): Promise<Array<{
+  id: number;
+  title: string;
+  link: string;
+  description: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string | null;
+  salary_period: string | null;
+  created_at: string;
+  similarity: number;
+}>> {
+  const vectorString = `[${queryEmbedding.join(',')}]`;
+
+  const result = await query(`
+    SELECT
+      j.id, j.title, j.link, j.description,
+      j.salary_min, j.salary_max, j.salary_currency, j.salary_period,
+      j.created_at,
+      1 - (e.embedding <=> $1::vector) as similarity
+    FROM jobs j
+    INNER JOIN job_embeddings e ON j.id = e.job_id
+    WHERE 1 - (e.embedding <=> $1::vector) >= $2
+    ORDER BY e.embedding <=> $1::vector
+    LIMIT $3
+  `, [vectorString, minSimilarity, limit]);
+
+  return result.rows;
+}
+
+/**
+ * Clear all job embeddings
+ */
+export async function clearAllEmbeddings(): Promise<void> {
+  await query('DELETE FROM job_embeddings');
+}
+
+/**
+ * Get embedding statistics
+ */
+export async function getEmbeddingStats(): Promise<{
+  total: number;
+  withEmbeddings: number;
+  withoutEmbeddings: number;
+}> {
+  const result = await query(`
+    SELECT
+      (SELECT COUNT(*) FROM jobs) as total,
+      (SELECT COUNT(*) FROM job_embeddings) as with_embeddings
+  `);
+
+  const row = result.rows[0];
+  const total = parseInt(row.total) || 0;
+  const withEmbeddings = parseInt(row.with_embeddings) || 0;
+
+  return {
+    total,
+    withEmbeddings,
+    withoutEmbeddings: total - withEmbeddings,
+  };
+}
+
+/**
+ * Get all jobs with embeddings (for blacklist checking)
+ */
+export async function getJobsWithEmbeddings(): Promise<Array<{ id: number; title: string; embedding: string }>> {
+  const result = await query<{ id: number; title: string; embedding: string }>(`
+    SELECT j.id, j.title, e.embedding::text as embedding
+    FROM jobs j
+    INNER JOIN job_embeddings e ON j.id = e.job_id
+    WHERE j.blacklisted = 0
+  `);
+  return result.rows;
+}
+
+/**
+ * Mark an email as processed
+ */
+export async function markEmailAsProcessed(gmailId: string): Promise<void> {
+  await query(
+    'UPDATE emails SET processed = 1 WHERE gmail_id = $1',
+    [gmailId]
+  );
+}
+
+/**
+ * Save a log entry to the database
+ */
+export function saveLog(
+  level: 'error' | 'warning' | 'info' | 'debug',
+  message: string,
+  options?: {
+    source?: string;
+    context?: Record<string, any>;
+    stackTrace?: string;
+  }
+): void {
+  // Fire and forget - don't block on logging
+  query(
+    `INSERT INTO logs (level, message, source, context, stack_trace)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [
+      level,
+      message,
+      options?.source || null,
+      options?.context ? JSON.stringify(options.context) : null,
+      options?.stackTrace || null,
+    ]
+  ).catch(err => {
+    console.error('[LOGGER] Failed to save log to database:', err.message);
+  });
+}
+
+// Export getDatabase as alias for getPool for compatibility
+export const getDatabase = getPool;
