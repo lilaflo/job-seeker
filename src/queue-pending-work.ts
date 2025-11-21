@@ -4,7 +4,7 @@
  * Run with: pnpm exec tsx src/queue-pending-work.ts
  */
 
-import { getDatabase } from './database';
+import { query } from './database';
 import { enqueueJobProcessing, enqueueBlacklistEmbeddings, checkRedisConnection } from './queue';
 
 async function main() {
@@ -20,13 +20,12 @@ async function main() {
   }
   console.log('✓ Redis is available\n');
 
-  const db = getDatabase();
-
   // 1. Queue blacklist keywords without embeddings
   console.log('1. Checking blacklist keywords...');
-  const blacklistKeywords = db.prepare(`
+  const blacklistResult = await query<{ id: number; keyword: string }>(`
     SELECT id, keyword FROM blacklist WHERE embedding IS NULL
-  `).all() as Array<{ id: number; keyword: string }>;
+  `);
+  const blacklistKeywords = blacklistResult.rows;
 
   if (blacklistKeywords.length > 0) {
     console.log(`   Found ${blacklistKeywords.length} keywords without embeddings`);
@@ -39,9 +38,10 @@ async function main() {
 
   // 2. Queue pending jobs
   console.log('2. Checking pending jobs...');
-  const pendingJobs = db.prepare(`
+  const pendingResult = await query<{ id: number; title: string; link: string; email_id: number | null }>(`
     SELECT id, title, link, email_id FROM jobs WHERE processing_status = 'pending'
-  `).all() as Array<{ id: number; title: string; link: string; email_id: number | null }>;
+  `);
+  const pendingJobs = pendingResult.rows;
 
   if (pendingJobs.length > 0) {
     console.log(`   Found ${pendingJobs.length} pending jobs`);
@@ -58,11 +58,12 @@ async function main() {
 
   // 3. Check for jobs without embeddings (completed jobs that somehow lost their embeddings)
   console.log('3. Checking jobs without embeddings...');
-  const jobsWithoutEmbeddings = db.prepare(`
+  const embeddingResult = await query<{ id: number; title: string }>(`
     SELECT id, title
     FROM jobs
     WHERE embedding IS NULL AND processing_status = 'completed'
-  `).all() as Array<{ id: number; title: string }>;
+  `);
+  const jobsWithoutEmbeddings = embeddingResult.rows;
 
   if (jobsWithoutEmbeddings.length > 0) {
     console.log(`   ⚠ Found ${jobsWithoutEmbeddings.length} completed jobs without embeddings`);
