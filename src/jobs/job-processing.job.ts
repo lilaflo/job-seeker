@@ -19,9 +19,11 @@ import {
   saveJobAsync,
   canCrawlUrl,
   updateJobProcessingStatus,
+  getJobById,
 } from '../database';
 import { scrapeJobPage } from '../job-scraper';
 import { logger } from '../logger';
+import { publishJobEvent } from '../pubsub';
 
 const minSimilarity = parseFloat(process.env.MIN_SIMILARITY || '0.6');
 
@@ -106,6 +108,28 @@ export async function processJobProcessingJob(
     await updateJobProcessingStatus(jobId, 'completed');
     console.debug(`  ✓ Job ${jobId} status updated to 'completed'`);
 
+    // Fetch the updated job and broadcast to frontend
+    const updatedJob = await getJobById(jobId);
+    if (updatedJob) {
+      if (isBlacklisted) {
+        // Broadcast removal for blacklisted jobs
+        await publishJobEvent({
+          type: 'job_removed',
+          jobId,
+          reason: 'blacklisted',
+        });
+        console.debug(`  → Published job_removed event for blacklisted job ${jobId}`);
+      } else {
+        // Broadcast update for completed jobs
+        await publishJobEvent({
+          type: 'job_updated',
+          jobId,
+          job: updatedJob,
+        });
+        console.debug(`  → Published job_updated event for job ${jobId}`);
+      }
+    }
+
     return {
       jobId,
       success: true,
@@ -120,6 +144,17 @@ export async function processJobProcessingJob(
 
     // Mark job as failed
     await updateJobProcessingStatus(jobId, 'failed');
+
+    // Broadcast update to frontend with failed status
+    const updatedJob = await getJobById(jobId);
+    if (updatedJob) {
+      await publishJobEvent({
+        type: 'job_updated',
+        jobId,
+        job: updatedJob,
+      });
+      console.debug(`  → Published job_updated event for failed job ${jobId}`);
+    }
 
     return {
       jobId,
