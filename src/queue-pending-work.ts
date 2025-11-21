@@ -59,10 +59,9 @@ async function main() {
   // 3. Check for jobs without embeddings (completed jobs that somehow lost their embeddings)
   console.log('3. Checking jobs without embeddings...');
   const jobsWithoutEmbeddings = db.prepare(`
-    SELECT j.id, j.title
-    FROM jobs j
-    LEFT JOIN job_embeddings e ON j.id = e.job_id
-    WHERE e.job_id IS NULL AND j.processing_status = 'completed'
+    SELECT id, title
+    FROM jobs
+    WHERE embedding IS NULL AND processing_status = 'completed'
   `).all() as Array<{ id: number; title: string }>;
 
   if (jobsWithoutEmbeddings.length > 0) {

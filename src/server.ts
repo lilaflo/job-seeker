@@ -311,7 +311,6 @@ async function handleResetDatabaseApi(res: http.ServerResponse): Promise<void> {
     // Truncate PostgreSQL tables (preserving schema and blacklist)
     const { query } = await import("./database");
 
-    await query('TRUNCATE TABLE job_embeddings CASCADE');
     await query('TRUNCATE TABLE job_skill_matches CASCADE');
     await query('TRUNCATE TABLE jobs CASCADE');
     await query('TRUNCATE TABLE emails CASCADE');
