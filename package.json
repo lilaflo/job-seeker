@@ -31,6 +31,7 @@
     "@types/chokidar": "^2.1.7",
     "@types/cli-progress": "^3.11.6",
     "@types/node": "^24.10.1",
+    "@types/pg": "^8.15.6",
     "@types/ws": "^8.18.1",
     "@vitest/ui": "^4.0.9",
     "chokidar": "^4.0.3",
@@ -52,6 +53,7 @@
     "googleapis": "^166.0.0",
     "ioredis": "^5.8.2",
     "ollama": "^0.6.3",
+    "pg": "^8.16.3",
     "sqlite-vec": "0.1.7-alpha.2",
     "turndown": "^7.2.2",
     "ws": "^8.18.3"

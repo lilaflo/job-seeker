@@ -1,60 +1,38 @@
 /**
  * Embeddings module - Generate and search vector embeddings using Ollama
- * Uses sqlite-vec for vector similarity search in SQLite
+ * PostgreSQL/pgvector version
  */
 
-import { getDatabase, getJobs, markJobBlacklisted, resetAllJobsBlacklisted, getBlacklistedJobCount } from './database';
-import * as sqliteVec from 'sqlite-vec';
+import {
+  getJobs,
+  markJobBlacklisted,
+  resetAllJobsBlacklisted,
+  getBlacklistedJobCount,
+  getBlacklistKeywords,
+  saveBlacklistKeywordWithoutEmbedding,
+  updateBlacklistKeywordEmbedding,
+  clearBlacklist,
+  getBlacklistText,
+  saveJobEmbedding,
+  getJobEmbedding,
+  hasJobEmbedding,
+  getJobsWithoutEmbeddings,
+  searchSimilarJobsPG,
+  clearAllEmbeddings,
+  getEmbeddingStats,
+  type BlacklistKeyword
+} from './database';
 import { getOllamaClient, isModelAvailable } from './ollama-client';
 
 // Embedding model configuration
 const EMBEDDING_MODEL = 'hf.co/Mungert/all-MiniLM-L6-v2-GGUF';
 const EMBEDDING_DIM = 384;
 
-// Queue configuration
-const BLACKLIST_CONCURRENCY = 10; // Number of concurrent embedding operations for blacklist
-
-/**
- * Process items in a queue with concurrency control
- */
-async function processQueue<T, R>(
-  items: T[],
-  processor: (item: T) => Promise<R>,
-  concurrency: number
-): Promise<Array<R>> {
-  const results: Array<R> = [];
-  let currentIndex = 0;
-
-  async function processNext(): Promise<void> {
-    while (currentIndex < items.length) {
-      const index = currentIndex++;
-      const item = items[index];
-      results[index] = await processor(item);
-    }
-  }
-
-  // Start concurrent workers
-  const workers = Array(Math.min(concurrency, items.length))
-    .fill(null)
-    .map(() => processNext());
-
-  await Promise.all(workers);
-  return results;
-}
-
 /**
  * Check if the embedding model is available in Ollama
  */
 export async function checkEmbeddingModelAvailable(): Promise<boolean> {
   return isModelAvailable(EMBEDDING_MODEL);
-}
-
-/**
- * Initialize sqlite-vec extension for the database
- */
-export function initializeVectorExtension(): void {
-  const db = getDatabase();
-  sqliteVec.load(db);
 }
 
 /**
@@ -76,28 +54,6 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   const response = await Promise.race([embeddingPromise, timeoutPromise]);
 
   return response.embedding;
-}
-
-/**
- * Convert embedding array to Buffer for SQLite storage
- */
-export function embeddingToBuffer(embedding: number[]): Buffer {
-  const buffer = Buffer.alloc(embedding.length * 4);
-  embedding.forEach((val, i) => {
-    buffer.writeFloatLE(val, i * 4);
-  });
-  return buffer;
-}
-
-/**
- * Convert Buffer back to embedding array
- */
-export function bufferToEmbedding(buffer: Buffer): number[] {
-  const embedding: number[] = [];
-  for (let i = 0; i < buffer.length; i += 4) {
-    embedding.push(buffer.readFloatLE(i));
-  }
-  return embedding;
 }
 
 /**
@@ -125,58 +81,7 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 /**
- * Save embedding for a job
- */
-export function saveJobEmbedding(jobId: number, embedding: number[]): void {
-  const db = getDatabase();
-  const buffer = embeddingToBuffer(embedding);
-
-  db.prepare(`
-    INSERT OR REPLACE INTO job_embeddings (job_id, embedding, embedding_dim, model)
-    VALUES (?, ?, ?, ?)
-  `).run(jobId, buffer, embedding.length, EMBEDDING_MODEL);
-}
-
-/**
- * Get embedding for a job
- */
-export function getJobEmbedding(jobId: number): number[] | null {
-  const db = getDatabase();
-  const row = db.prepare(`
-    SELECT embedding FROM job_embeddings WHERE job_id = ?
-  `).get(jobId) as { embedding: Buffer } | undefined;
-
-  if (!row) return null;
-  return bufferToEmbedding(row.embedding);
-}
-
-/**
- * Check if job has an embedding
- */
-export function hasJobEmbedding(jobId: number): boolean {
-  const db = getDatabase();
-  const row = db.prepare(`
-    SELECT 1 FROM job_embeddings WHERE job_id = ?
-  `).get(jobId);
-
-  return !!row;
-}
-
-/**
- * Get jobs without embeddings
- */
-export function getJobsWithoutEmbeddings(): Array<{ id: number; title: string; description: string | null }> {
-  const db = getDatabase();
-  return db.prepare(`
-    SELECT j.id, j.title, j.description
-    FROM jobs j
-    LEFT JOIN job_embeddings e ON j.id = e.job_id
-    WHERE e.job_id IS NULL
-  `).all() as Array<{ id: number; title: string; description: string | null }>;
-}
-
-/**
- * Search for similar jobs using vector similarity
+ * Search for similar jobs using vector similarity (pgvector)
  */
 export async function searchSimilarJobs(
   query: string,
@@ -201,53 +106,8 @@ export async function searchSimilarJobs(
   // Generate embedding for search query
   const queryEmbedding = await generateEmbedding(query);
 
-  const db = getDatabase();
-
-  // Get all jobs with embeddings
-  const jobsWithEmbeddings = db.prepare(`
-    SELECT
-      j.id, j.title, j.link, j.description,
-      j.salary_min, j.salary_max, j.salary_currency, j.salary_period,
-      j.created_at, e.embedding
-    FROM jobs j
-    INNER JOIN job_embeddings e ON j.id = e.job_id
-  `).all() as Array<{
-    id: number;
-    title: string;
-    link: string;
-    description: string | null;
-    salary_min: number | null;
-    salary_max: number | null;
-    salary_currency: string | null;
-    salary_period: string | null;
-    created_at: string;
-    embedding: Buffer;
-  }>;
-
-  // Calculate similarity for each job
-  const results = jobsWithEmbeddings
-    .map(job => {
-      const jobEmbedding = bufferToEmbedding(job.embedding);
-      const similarity = cosineSimilarity(queryEmbedding, jobEmbedding);
-
-      return {
-        id: job.id,
-        title: job.title,
-        link: job.link,
-        description: job.description,
-        salary_min: job.salary_min,
-        salary_max: job.salary_max,
-        salary_currency: job.salary_currency,
-        salary_period: job.salary_period,
-        created_at: job.created_at,
-        similarity,
-      };
-    })
-    .filter(job => job.similarity >= minSimilarity)
-    .sort((a, b) => b.similarity - a.similarity)
-    .slice(0, limit);
-
-  return results;
+  // Use pgvector similarity search
+  return searchSimilarJobsPG(queryEmbedding, limit, minSimilarity);
 }
 
 /**
@@ -264,123 +124,69 @@ export async function generateAndSaveJobEmbedding(
     : title;
 
   const embedding = await generateEmbedding(textToEmbed);
-  saveJobEmbedding(jobId, embedding);
+  await saveJobEmbedding(jobId, embedding, EMBEDDING_MODEL);
 }
 
 /**
- * Get embedding statistics
+ * Convert embedding to pgvector-compatible format
  */
-export function getEmbeddingStats(): {
-  total: number;
-  withEmbeddings: number;
-  withoutEmbeddings: number;
-} {
-  const db = getDatabase();
-
-  const total = (db.prepare('SELECT COUNT(*) as count FROM jobs').get() as { count: number }).count;
-  const withEmbeddings = (db.prepare('SELECT COUNT(*) as count FROM job_embeddings').get() as { count: number }).count;
-
-  return {
-    total,
-    withEmbeddings,
-    withoutEmbeddings: total - withEmbeddings,
-  };
+function embeddingToVector(embedding: number[]): string {
+  return `[${embedding.join(',')}]`;
 }
 
 /**
- * Clear all embeddings (for testing)
+ * Convert pgvector string back to embedding array
  */
-export function clearAllEmbeddings(): void {
-  const db = getDatabase();
-  db.prepare('DELETE FROM job_embeddings').run();
+function vectorToEmbedding(vectorString: string): number[] {
+  return vectorString.slice(1, -1).split(',').map(parseFloat);
 }
 
-// ============================================================================
+/**
+ * For compatibility - convert Buffer to embedding (not used in PostgreSQL)
+ */
+export function bufferToEmbedding(buffer: Buffer | string): number[] {
+  if (typeof buffer === 'string') {
+    return vectorToEmbedding(buffer);
+  }
+  // SQLite buffer compatibility (shouldn't be used with PostgreSQL)
+  const embedding: number[] = [];
+  for (let i = 0; i < buffer.length; i += 4) {
+    embedding.push(buffer.readFloatLE(i));
+  }
+  return embedding;
+}
+
+/**
+ * For compatibility - convert embedding to Buffer (not used in PostgreSQL)
+ */
+export function embeddingToBuffer(embedding: number[]): Buffer {
+  const buffer = Buffer.alloc(embedding.length * 4);
+  embedding.forEach((val, i) => {
+    buffer.writeFloatLE(val, i * 4);
+  });
+  return buffer;
+}
+
+// =============================================================================
 // Blacklist Functions
-// ============================================================================
+// =============================================================================
 
-export interface BlacklistKeyword {
-  id: number;
-  keyword: string;
-  embedding: Buffer | null;
-  embedding_dim: number | null;
-  model: string | null;
-  created_at: string;
-}
+export { type BlacklistKeyword };
 
 /**
  * Get all blacklist keywords
  */
-export function getBlacklistKeywords(): BlacklistKeyword[] {
-  const db = getDatabase();
-  return db.prepare('SELECT * FROM blacklist ORDER BY keyword ASC').all() as BlacklistKeyword[];
-}
+export { getBlacklistKeywords };
 
 /**
  * Get blacklist keywords as text (one per line)
  */
-export function getBlacklistText(): string {
-  const keywords = getBlacklistKeywords();
-  return keywords.map(k => k.keyword).join('\n');
-}
+export { getBlacklistText };
 
 /**
  * Clear all blacklist keywords
  */
-export function clearBlacklist(): void {
-  const db = getDatabase();
-  db.prepare('DELETE FROM blacklist').run();
-}
-
-/**
- * Save a blacklist keyword with its embedding
- */
-export function saveBlacklistKeyword(keyword: string, embedding: number[]): void {
-  const db = getDatabase();
-  const buffer = embeddingToBuffer(embedding);
-
-  db.prepare(`
-    INSERT OR REPLACE INTO blacklist (keyword, embedding, embedding_dim, model)
-    VALUES (?, ?, ?, ?)
-  `).run(keyword, buffer, embedding.length, EMBEDDING_MODEL);
-}
-
-/**
- * Save a blacklist keyword without embedding (embedding will be generated later)
- * Returns the ID of the saved keyword
- */
-export function saveBlacklistKeywordWithoutEmbedding(keyword: string): number {
-  const db = getDatabase();
-
-  const result = db.prepare(`
-    INSERT INTO blacklist (keyword, embedding, embedding_dim, model)
-    VALUES (?, NULL, NULL, NULL)
-  `).run(keyword);
-
-  return result.lastInsertRowid as number;
-}
-
-/**
- * Update embedding for an existing blacklist keyword
- */
-export function updateBlacklistKeywordEmbedding(blacklistId: number, embedding: number[]): void {
-  const db = getDatabase();
-  const buffer = embeddingToBuffer(embedding);
-
-  console.debug(`  → Updating blacklist ${blacklistId}: buffer size=${buffer.length}, dim=${embedding.length}, model=${EMBEDDING_MODEL}`);
-
-  const result = db.prepare(`
-    UPDATE blacklist
-    SET embedding = ?, embedding_dim = ?, model = ?
-    WHERE id = ?
-  `).run(buffer, embedding.length, EMBEDDING_MODEL, blacklistId);
-
-  console.debug(`  → Update result: changes=${result.changes}`);
-
-  if (result.changes === 0) {
-    console.error(`  ✗ WARNING: No rows updated for blacklist ID ${blacklistId}`);
-  }
-}
+export { clearBlacklist };
 
 /**
  * Update blacklist from text (one keyword per line)
@@ -396,10 +202,10 @@ export async function updateBlacklistFromText(text: string): Promise<{ count: nu
   console.log(`🔄 Updating blacklist with ${keywords.length} keywords...`);
 
   // Clear existing blacklist
-  clearBlacklist();
+  await clearBlacklist();
 
   // Reset all jobs to not blacklisted
-  resetAllJobsBlacklisted();
+  await resetAllJobsBlacklisted();
 
   // If no keywords, return early
   if (keywords.length === 0) {
@@ -411,7 +217,7 @@ export async function updateBlacklistFromText(text: string): Promise<{ count: nu
   console.log(`  → Saving ${keywords.length} keywords to database...`);
   const keywordIds: Array<{ keyword: string; id: number }> = [];
   for (const keyword of keywords) {
-    const id = saveBlacklistKeywordWithoutEmbedding(keyword);
+    const id = await saveBlacklistKeywordWithoutEmbedding(keyword);
     keywordIds.push({ keyword, id });
   }
   console.log(`  ✓ Saved ${keywords.length} keywords`);
@@ -436,61 +242,31 @@ export async function updateBlacklistFromText(text: string): Promise<{ count: nu
 }
 
 /**
- * Check if text matches any blacklisted keyword using semantic similarity
+ * Update blacklist keyword embedding
  */
-export async function isBlacklisted(
-  text: string,
-  options: { minSimilarity?: number } = {}
-): Promise<{ blacklisted: boolean; matchedKeyword?: string; similarity?: number }> {
-  const { minSimilarity = 0.7 } = options;
-
-  const keywords = getBlacklistKeywords();
-  if (keywords.length === 0) {
-    return { blacklisted: false };
-  }
-
-  // Generate embedding for the text
-  const textEmbedding = await generateEmbedding(text);
-
-  // Check similarity with each blacklisted keyword
-  for (const keyword of keywords) {
-    if (!keyword.embedding) continue;
-
-    const keywordEmbedding = bufferToEmbedding(keyword.embedding);
-    const similarity = cosineSimilarity(textEmbedding, keywordEmbedding);
-
-    if (similarity >= minSimilarity) {
-      return {
-        blacklisted: true,
-        matchedKeyword: keyword.keyword,
-        similarity,
-      };
-    }
-  }
-
-  return { blacklisted: false };
-}
+export { updateBlacklistKeywordEmbedding };
 
 /**
- * Check if a job title/description matches blacklist
+ * Export embedding statistics
  */
-export async function isJobBlacklisted(
-  title: string,
-  description: string | null,
-  options: { minSimilarity?: number } = {}
-): Promise<{ blacklisted: boolean; matchedKeyword?: string; similarity?: number }> {
-  // Check title first
-  const titleResult = await isBlacklisted(title, options);
-  if (titleResult.blacklisted) {
-    return titleResult;
-  }
+export { getEmbeddingStats };
 
-  // Check description if available
-  if (description) {
-    return isBlacklisted(description, options);
-  }
+/**
+ * Export hasJobEmbedding
+ */
+export { hasJobEmbedding };
 
-  return { blacklisted: false };
-}
+/**
+ * Export getJobEmbedding
+ */
+export { getJobEmbedding };
 
-export { EMBEDDING_MODEL, EMBEDDING_DIM };
+/**
+ * Export getJobsWithoutEmbeddings
+ */
+export { getJobsWithoutEmbeddings };
+
+/**
+ * Export clearAllEmbeddings
+ */
+export { clearAllEmbeddings };
