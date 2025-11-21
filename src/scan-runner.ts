@@ -6,7 +6,7 @@
 import { authorize, testGmailConnection } from './gmail-auth';
 import { fetchEmails, fetchEmailBodies, processEmailsWithProgress } from './email-scanner';
 import { checkOllamaAvailability, getBestModel, categorizeEmail, type CategorizedEmail } from './email-categorizer';
-import { getScannedEmailIds, saveEmail, markEmailAsProcessed, getEmailStats, getDatabase, saveJob, isJobScanned } from './database';
+import { getScannedEmailIds, saveEmail, markEmailAsProcessed, getEmailStats, getEmailByGmailId, saveJobAsync, isJobScanned } from './database';
 import { enqueueJobExtraction, enqueueJobProcessing, checkRedisConnection } from './queue';
 import { logger } from './logger';
 import { extractJobUrls, deduplicateUrls, extractJobTitle, extractJobsWithTitles } from './url-extractor';
@@ -88,7 +88,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
   });
 
   if (emails.length === 0) {
-    const stats = getEmailStats();
+    const stats = await getEmailStats();
     emitProgress({ type: 'complete', message: 'No emails found to process' });
     return {
       success: true,
@@ -102,12 +102,12 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
   }
 
   // Filter out already scanned emails
-  const scannedIds = getScannedEmailIds();
+  const scannedIds = await getScannedEmailIds();
   const newEmails = emails.filter(email => !scannedIds.includes(email.id));
   const skipped = emails.length - newEmails.length;
 
   if (newEmails.length === 0) {
-    const stats = getEmailStats();
+    const stats = await getEmailStats();
     emitProgress({ type: 'complete', message: 'All emails have already been scanned' });
     return {
       success: true,
@@ -147,10 +147,18 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
       };
 
       // Persist to database immediately after categorization
-      saveEmail(categorizedEmail, category, body);
+      await saveEmail(
+        email.id,
+        email.subject || null,
+        email.from || null,
+        body,
+        category.confidence,
+        category.isJobRelated,
+        category.reason
+      );
 
       // Mark email as processed to prevent reprocessing
-      markEmailAsProcessed(categorizedEmail.id);
+      await markEmailAsProcessed(categorizedEmail.id);
 
       // Emit event for this processed email
       processedCount++;
@@ -193,14 +201,13 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
       message: `Creating ${jobRelatedEmails.length} placeholder jobs...`
     });
 
-    const db = getDatabase();
     for (let i = 0; i < jobRelatedEmails.length; i++) {
       const email = jobRelatedEmails[i];
       const body = bodies.get(email.id) || '';
 
       try {
         // Get email database ID
-        const savedEmail = db.prepare('SELECT id FROM emails WHERE gmail_id = ?').get(email.id) as { id: number } | undefined;
+        const savedEmail = await getEmailByGmailId(email.id);
 
         if (!savedEmail) {
           logger.error(`Email ${email.id} not found in database`, { source: 'scan-runner', context: { gmailId: email.id } });
@@ -226,12 +233,41 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
 
           for (let j = 0; j < uniqueUrls.length; j++) {
             const url = uniqueUrls[j];
-            if (isJobScanned(url)) continue;
+            if (await isJobScanned(url)) {
+              console.debug(`  → Job already exists, skipping: ${url}`);
+              continue;
+            }
 
-            const title = uniqueUrls.length > 1 ? `${baseTitle} (${j + 1})` : baseTitle;
-            console.debug(`  → Creating placeholder job: ${title}`);
-            saveJob(title, url, savedEmail.id);
-            jobsCreated++;
+            // Try AI extraction for individual job titles
+            let title = '';
+            try {
+              const { extractJobTitleWithAI } = await import('./ai-title-extractor');
+              const aiTitle = await extractJobTitleWithAI(body, url, model);
+              if (aiTitle) {
+                title = aiTitle;
+                console.debug(`  → Using AI-extracted title: ${title}`);
+              }
+            } catch (error) {
+              console.error(`  ✗ AI title extraction failed:`, error);
+            }
+
+            // Fall back to baseTitle if AI extraction failed
+            if (!title) {
+              title = uniqueUrls.length > 1 ? `${baseTitle} (${j + 1})` : baseTitle;
+              console.debug(`  → Using fallback title: ${title}`);
+            }
+
+            const result = await saveJobAsync(title, url, savedEmail.id);
+            if (result.isNew) {
+              jobsCreated++;
+              console.debug(`  ✓ New job created: ${title}`);
+
+              // Enqueue job for processing
+              console.debug(`  → Enqueuing job ${result.id} for processing`);
+              await enqueueJobProcessing(result.id, title, url, savedEmail.id);
+            } else {
+              console.debug(`  ↻ Job updated (not enqueued): ${title}`);
+            }
           }
         } else {
           // Use extracted titles
@@ -239,21 +275,25 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
 
           for (const job of jobsWithTitles) {
             // Skip if already scanned
-            if (isJobScanned(job.url)) {
+            if (await isJobScanned(job.url)) {
               console.debug(`  → Job already scanned, skipping: ${job.title}`);
               continue;
             }
 
             // Save job with actual title from email
             console.debug(`  → Creating job: ${job.title}`);
-            saveJob(job.title, job.url, savedEmail.id);
-            jobsCreated++;
+            const result = await saveJobAsync(job.title, job.url, savedEmail.id);
 
-            // Enqueue job for processing
-            const savedJob = db.prepare('SELECT id FROM jobs WHERE link = ?').get(job.url) as { id: number } | undefined;
-            if (savedJob) {
-              console.debug(`  → Enqueuing job ${savedJob.id} for processing`);
-              await enqueueJobProcessing(savedJob.id, job.title, job.url, savedEmail.id);
+            // Only increment counter and enqueue for NEW jobs
+            if (result.isNew) {
+              jobsCreated++;
+              console.debug(`  ✓ New job created: ${job.title}`);
+
+              // Enqueue job for processing
+              console.debug(`  → Enqueuing job ${result.id} for processing`);
+              await enqueueJobProcessing(result.id, job.title, job.url, savedEmail.id);
+            } else {
+              console.debug(`  ↻ Job updated (not enqueued): ${job.title}`);
             }
           }
         }
@@ -273,7 +313,7 @@ export async function runScan(options: ScanOptions = {}): Promise<ScanResult> {
 
   let jobsEnqueued = jobsCreated; // For backwards compatibility with UI
 
-  const stats = getEmailStats();
+  const stats = await getEmailStats();
 
   emitProgress({
     type: 'complete',

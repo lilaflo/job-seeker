@@ -123,24 +123,82 @@ export function extractJobsWithTitles(body: string): Array<{ title: string; url:
   const results: Array<{ title: string; url: string }> = [];
   const lines = body.split('\n');
 
+  // Words/phrases that indicate a line is NOT a job title
+  const skipPatterns = [
+    /easily apply/i,
+    /days? ago/i,
+    /hours? ago/i,
+    /^(new|indeed|job alert|jobs? \d+)/i,
+    /^see matching/i,
+    /^https?:\/\//,
+    /^$/,  // empty lines
+  ];
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
 
-    // Look for lines with " - https://" pattern (title - URL)
-    const match = line.match(/^(.+?)\s+-\s+(https?:\/\/[^\s]+)/);
-    if (match) {
-      let title = match[1].trim();
-      const url = match[2].trim();
+    // Pattern 1: Look for lines with " - https://" pattern (title - URL)
+    const inlineMatch = line.match(/^(.+?)\s+-\s+(https?:\/\/[^\s]+)/);
+    if (inlineMatch) {
+      let title = inlineMatch[1].trim();
+      const url = inlineMatch[2].trim();
 
-      // Clean up the URL (remove HTML entities and trailing chars)
       const cleanUrl = url
         .replace(/&amp;/g, '&')
         .replace(/[.,;:!?)\]}>]+$/, '');
 
-      // Only include if it's a job URL
       if (JOB_URL_PATTERNS.some((pattern) => pattern.test(cleanUrl)) ||
           cleanUrl.toLowerCase().includes('/job') ||
           cleanUrl.toLowerCase().includes('/vacanc')) {
+        results.push({ title, url: cleanUrl });
+      }
+      continue;
+    }
+
+    // Pattern 2: Look for standalone URLs (Indeed format)
+    const urlMatch = line.match(/^(https?:\/\/[^\s]+)/);
+    if (urlMatch) {
+      const url = urlMatch[1].trim();
+      const cleanUrl = url
+        .replace(/&amp;/g, '&')
+        .replace(/[.,;:!?)\]}>]+$/, '');
+
+      // Only process job URLs
+      if (!(JOB_URL_PATTERNS.some((pattern) => pattern.test(cleanUrl)) ||
+            cleanUrl.toLowerCase().includes('/job') ||
+            cleanUrl.toLowerCase().includes('/vacanc'))) {
+        continue;
+      }
+
+      // Look backwards up to 10 lines to find the job title
+      let title = '';
+      for (let j = i - 1; j >= Math.max(0, i - 10); j--) {
+        const candidateLine = lines[j].trim();
+
+        // Skip lines that are clearly not titles
+        if (skipPatterns.some(pattern => pattern.test(candidateLine))) {
+          continue;
+        }
+
+        // A good job title is typically 10-100 characters
+        if (candidateLine.length >= 10 && candidateLine.length <= 100) {
+          // Reject suspicious "titles" that are likely not job titles
+          const suspiciousPatterns = [
+            /^just posted$/i,
+            /^new$/i,
+            /^today$/i,
+            /^yesterday$/i,
+            /^\d+\s+(day|hour|minute)s?\s+ago$/i,
+          ];
+
+          if (!suspiciousPatterns.some(pattern => pattern.test(candidateLine))) {
+            title = candidateLine;
+            break;
+          }
+        }
+      }
+
+      if (title) {
         results.push({ title, url: cleanUrl });
       }
     }
@@ -158,14 +216,48 @@ export function extractJobTitle(subject: string | null, body?: string): string {
     return "Job Opportunity";
   }
 
-  // Remove common prefixes
+  // Remove common email prefixes
   let title = subject
     .replace(/^(Re:|Fwd?:|AW:)\s*/gi, "")
     .replace(/^\[.*?\]\s*/g, "")
     .trim();
 
-  // Remove trailing metadata like "[Company Name]"
-  title = title.replace(/\s*[\[\(].*?[\]\)]$/g, "").trim();
+  // Remove common job email subject patterns to extract actual job title
+  const jobPatterns = [
+    /^complete your application for\s+/i,
+    /^apply for\s+/i,
+    /^new job:?\s+/i,
+    /^job alert:?\s+/i,
+    /^job opportunity:?\s+/i,
+    /^hiring:?\s+/i,
+    /^we're hiring:?\s+/i,
+    /^\d+\s+new jobs?:?\s+/i,
+    /^\d+\s+new job offers? found:?\s*/i,
+    /^„([^"]+)":\s+/,  // German pattern: „Job Title": ...
+  ];
+
+  for (const pattern of jobPatterns) {
+    title = title.replace(pattern, '');
+  }
+
+  title = title.trim();
+
+  // Remove trailing promotional phrases and metadata
+  const trailingPatterns = [
+    /\s*-\s+and \d+ more .* jobs? in .*/i,  // " - and 23 more it jobs in Location"
+    /\s*-\s+\d+ more .* jobs? in .*/i,       // " - 23 more jobs in Location"
+    /\s*\+\s+\d+ neue Jobs in .*/i,          // " + 30 neue Jobs in Location" (German)
+    /\s*und weitere$/i,                       // " und weitere" (German)
+    /\s*and more$/i,                          // " and more"
+    /\s*for you!?$/i,                        // " for you!"
+    /\s*[\[\(].*?[\]\)]$/g,                  // "[Company Name]" or "(Location)"
+  ];
+
+  for (const pattern of trailingPatterns) {
+    title = title.replace(pattern, '');
+  }
+
+  title = title.trim();
 
   // If title is too short or generic, try to extract from body
   if (title.length < 10 && body) {
