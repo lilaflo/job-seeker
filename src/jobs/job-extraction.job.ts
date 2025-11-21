@@ -10,7 +10,7 @@ import {
   enqueueJobProcessing,
 } from '../queue';
 import { extractJobUrls, extractJobTitle, deduplicateUrls } from '../url-extractor';
-import { saveJob, isJobScanned, getDatabase } from '../database';
+import { saveJobAsync, isJobScanned } from '../database';
 import { logger } from '../logger';
 
 export async function processJobExtractionJob(
@@ -21,26 +21,8 @@ export async function processJobExtractionJob(
   console.debug(`📋 Extracting jobs from email ${emailId}: ${subject.substring(0, 40)}...`);
 
   try {
-    // Verify email exists in database first
-    const db = getDatabase();
-    const emailExists = db.prepare('SELECT id, gmail_id, subject FROM emails WHERE id = ?').get(emailId) as { id: number; gmail_id: string; subject: string } | undefined;
-
-    if (!emailExists) {
-      // Check if email exists by gmail_id instead
-      const emailByGmailId = db.prepare('SELECT id, gmail_id, subject FROM emails WHERE gmail_id = ?').get(gmailId) as { id: number; gmail_id: string; subject: string } | undefined;
-
-      if (emailByGmailId) {
-        const errorMsg = `Email ID mismatch: Received emailId=${emailId}, but email exists with id=${emailByGmailId.id} (gmail_id=${gmailId})`;
-        logger.error(errorMsg, { source: 'job-extraction.job', context: { emailId, gmailId, correctId: emailByGmailId.id } });
-        console.error(`  ✗ ${errorMsg}`);
-        throw new Error(`Email ID mismatch: Expected ${emailId}, found ${emailByGmailId.id} for gmail_id ${gmailId}`);
-      }
-
-      throw new Error(`Email with ID ${emailId} not found in database (gmail_id: ${gmailId})`);
-    }
-
-    console.debug(`  → Email verified in database: ID=${emailExists.id}, Gmail ID=${emailExists.gmail_id}, Subject="${emailExists.subject}"`);
-
+    // Note: Email existence is verified by the caller
+    // No need to verify again here
 
     // Extract job URLs from email body
     const jobUrls = extractJobUrls(body);
@@ -65,8 +47,8 @@ export async function processJobExtractionJob(
     for (let i = 0; i < uniqueUrls.length; i++) {
       const url = uniqueUrls[i];
 
-      // Check if job already scanned
-      if (isJobScanned(url)) {
+      // Check if job already scanned (async)
+      if (await isJobScanned(url)) {
         console.debug(`  → Job already scanned, skipping: ${url}`);
         continue;
       }
@@ -78,21 +60,18 @@ export async function processJobExtractionJob(
       console.debug(`    - URL: ${url}`);
       console.debug(`    - Email ID: ${emailId}`);
 
-      // Save job to database
+      // Save job to database (async)
       try {
-        saveJob(title, url, emailId);
-        console.debug(`  ✓ Job saved successfully: ${title}`);
-        extractedCount++;
+        const result = await saveJobAsync(title, url, emailId);
+        if (result.isNew) {
+          console.debug(`  ✓ New job created: ${title} (ID: ${result.id})`);
+          extractedCount++;
 
-        // Get the saved job ID
-        const savedJob = db.prepare('SELECT id FROM jobs WHERE link = ?').get(url) as { id: number } | undefined;
-
-        // Enqueue job processing
-        if (savedJob) {
-          console.debug(`  → Enqueuing job processing for job ID ${savedJob.id}`);
-          await enqueueJobProcessing(savedJob.id, title, url, emailId);
+          // Enqueue job processing for NEW jobs only
+          console.debug(`  → Enqueuing job processing for job ID ${result.id}`);
+          await enqueueJobProcessing(result.id, title, url, emailId);
         } else {
-          console.debug(`  ✗ Job not found after save: ${url}`);
+          console.debug(`  ↻ Job already exists (not enqueued): ${title} (ID: ${result.id})`);
         }
       } catch (saveError) {
         logger.errorFromException(saveError, { source: 'job-extraction.job', context: { title, url, emailId } });

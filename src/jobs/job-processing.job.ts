@@ -11,25 +11,19 @@ import {
 import {
   generateAndSaveJobEmbedding,
   getBlacklistKeywords,
-  bufferToEmbedding,
   cosineSimilarity,
   getJobEmbedding,
 } from '../embeddings';
 import {
   markJobBlacklisted,
-  saveJob,
+  saveJobAsync,
   canCrawlUrl,
   updateJobProcessingStatus,
 } from '../database';
 import { scrapeJobPage } from '../job-scraper';
 import { logger } from '../logger';
 
-// Pre-fetch blacklist embeddings for fast comparison
-const blacklistKeywords = getBlacklistKeywords();
-const blacklistEmbeddings = blacklistKeywords
-  .filter(k => k.embedding)
-  .map(k => bufferToEmbedding(k.embedding!));
-const minSimilarity = 0.7;
+const minSimilarity = parseFloat(process.env.MIN_SIMILARITY || '0.6');
 
 let ollamaModel: string | null = null;
 
@@ -45,7 +39,7 @@ export async function processJobProcessingJob(
   console.debug(`🔍 Processing job ${jobId}: ${title.substring(0, 40)}...`);
 
   // Mark job as processing
-  updateJobProcessingStatus(jobId, 'processing');
+  await updateJobProcessingStatus(jobId, 'processing');
 
   try {
     let hasDescription = false;
@@ -54,7 +48,7 @@ export async function processJobProcessingJob(
     let scrapedDescription: string | null = null;
 
     // Check if platform can be crawled
-    const isCrawlable = canCrawlUrl(url);
+    const isCrawlable = await canCrawlUrl(url);
 
     if (isCrawlable && ollamaModel) {
       // Fetch and summarize job description
@@ -62,7 +56,7 @@ export async function processJobProcessingJob(
 
       if (!scraped.error && scraped.description && scraped.description.length >= 100) {
         // Save job with description and salary
-        saveJob(title, url, emailId ?? undefined, scraped.salary, scraped.description);
+        await saveJobAsync(title, url, emailId ?? undefined, scraped.salary, scraped.description);
         scrapedDescription = scraped.description;
         hasDescription = true;
       }
@@ -74,16 +68,26 @@ export async function processJobProcessingJob(
     hasEmbedding = true;
     console.debug(`  ✓ Embedding generated for job ${jobId}`);
 
+    // Fetch blacklist embeddings (async)
+    const blacklistKeywords = await getBlacklistKeywords();
+    const blacklistEmbeddings = blacklistKeywords
+      .filter(k => k.embedding)
+      .map(k => {
+        // Parse pgvector string format
+        const embString = k.embedding!;
+        return embString.slice(1, -1).split(',').map(parseFloat);
+      });
+
     // Check against blacklist
     if (blacklistEmbeddings.length > 0) {
       console.debug(`  → Checking job ${jobId} against ${blacklistEmbeddings.length} blacklist keywords...`);
-      const jobEmbedding = getJobEmbedding(jobId);
+      const jobEmbedding = await getJobEmbedding(jobId);
 
       if (jobEmbedding) {
         for (const blacklistEmb of blacklistEmbeddings) {
           const similarity = cosineSimilarity(jobEmbedding, blacklistEmb);
           if (similarity >= minSimilarity) {
-            markJobBlacklisted(jobId, true);
+            await markJobBlacklisted(jobId, true);
             isBlacklisted = true;
             console.debug(`  ✗ Job ${jobId} matched blacklist (similarity: ${similarity.toFixed(2)})`);
             break;
@@ -99,7 +103,7 @@ export async function processJobProcessingJob(
 
     // Mark job as completed
     console.debug(`  → Setting job ${jobId} status to 'completed'...`);
-    updateJobProcessingStatus(jobId, 'completed');
+    await updateJobProcessingStatus(jobId, 'completed');
     console.debug(`  ✓ Job ${jobId} status updated to 'completed'`);
 
     return {
@@ -115,7 +119,7 @@ export async function processJobProcessingJob(
     console.error(`  ✗ Job processing failed for job ${jobId}: ${errorMessage}`);
 
     // Mark job as failed
-    updateJobProcessingStatus(jobId, 'failed');
+    await updateJobProcessingStatus(jobId, 'failed');
 
     return {
       jobId,

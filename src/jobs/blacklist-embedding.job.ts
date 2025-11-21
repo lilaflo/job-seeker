@@ -16,12 +16,12 @@ import {
 } from '../embeddings';
 import {
   markJobBlacklisted,
-  getDatabase,
+  getJobsWithEmbeddings,
 } from '../database';
 import { logger } from '../logger';
 import { publishJobEvent } from '../pubsub';
 
-const MIN_SIMILARITY = 0.7;
+const MIN_SIMILARITY = parseFloat(process.env.MIN_SIMILARITY || '0.6');
 
 export async function processBlacklistEmbeddingJob(
   job: Bull.Job<BlacklistEmbeddingJobData>
@@ -47,7 +47,7 @@ export async function processBlacklistEmbeddingJob(
 
     // Save embedding to database
     try {
-      updateBlacklistKeywordEmbedding(blacklistId, embedding);
+      await updateBlacklistKeywordEmbedding(blacklistId, embedding);
       console.debug(`  ✓ Embedding saved for "${keyword}"`);
     } catch (error) {
       logger.errorFromException(error, {
@@ -58,15 +58,9 @@ export async function processBlacklistEmbeddingJob(
     }
 
     // Get all jobs with embeddings
-    let jobsWithEmbeddings: Array<{ id: number; title: string; embedding: Buffer }>;
+    let jobsWithEmbeddings: Array<{ id: number; title: string; embedding: string }>;
     try {
-      const db = getDatabase();
-      jobsWithEmbeddings = db.prepare(`
-        SELECT j.id, j.title, e.embedding
-        FROM jobs j
-        INNER JOIN job_embeddings e ON j.id = e.job_id
-        WHERE j.blacklisted = 0
-      `).all() as Array<{ id: number; title: string; embedding: Buffer }>;
+      jobsWithEmbeddings = await getJobsWithEmbeddings();
 
       console.debug(`  → Checking ${jobsWithEmbeddings.length} jobs against "${keyword}"...`);
     } catch (error) {
@@ -79,15 +73,16 @@ export async function processBlacklistEmbeddingJob(
 
     // Check each job against this blacklist keyword
     let jobsBlacklisted = 0;
-    const { bufferToEmbedding } = await import('../embeddings');
 
     for (const jobRow of jobsWithEmbeddings) {
       try {
-        const jobEmbedding = bufferToEmbedding(jobRow.embedding);
+        // Parse pgvector string format: "[0.1,0.2,0.3,...]"
+        const embeddingString = jobRow.embedding;
+        const jobEmbedding = embeddingString.slice(1, -1).split(',').map(parseFloat);
         const similarity = cosineSimilarity(jobEmbedding, embedding);
 
         if (similarity >= MIN_SIMILARITY) {
-          markJobBlacklisted(jobRow.id, true);
+          await markJobBlacklisted(jobRow.id, true);
           jobsBlacklisted++;
           console.debug(`    ✗ Job ${jobRow.id} blacklisted: "${jobRow.title}" (similarity: ${similarity.toFixed(2)})`);
 

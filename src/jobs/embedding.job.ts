@@ -18,19 +18,22 @@ import {
 import { markJobBlacklisted } from '../database';
 import { logger } from '../logger';
 
-// Pre-fetch blacklist embeddings for fast comparison
-const blacklistKeywords = getBlacklistKeywords();
-const blacklistEmbeddings = blacklistKeywords
-  .filter(k => k.embedding)
-  .map(k => bufferToEmbedding(k.embedding!));
 const minSimilarity = 0.7;
-
-console.log(`Loaded ${blacklistEmbeddings.length} blacklist embeddings`);
 
 export async function processEmbeddingJob(
   job: Bull.Job<EmbeddingJobData>
 ): Promise<EmbeddingJobResult> {
   const { jobId, title, description } = job.data;
+
+  // Fetch blacklist embeddings (async)
+  const blacklistKeywords = await getBlacklistKeywords();
+  const blacklistEmbeddings = blacklistKeywords
+    .filter(k => k.embedding)
+    .map(k => {
+      // Parse pgvector string format
+      const embString = k.embedding!;
+      return embString.slice(1, -1).split(',').map(parseFloat);
+    });
 
   console.debug(`Processing job ${jobId}: ${title.substring(0, 50)}...`);
 

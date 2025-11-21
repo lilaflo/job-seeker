@@ -34,7 +34,7 @@ async function main() {
     }
 
     // Filter out already scanned emails
-    const scannedIds = getScannedEmailIds();
+    const scannedIds = await getScannedEmailIds();
     const newEmails = emails.filter(email => !scannedIds.includes(email.id));
 
     if (newEmails.length === 0) {
@@ -64,10 +64,10 @@ async function main() {
         };
 
         // Persist to database immediately after categorization
-        saveEmail(categorizedEmail, category, body);
+        await saveEmail(categorizedEmail, category, body);
 
         // Mark email as processed to prevent reprocessing
-        markEmailAsProcessed(categorizedEmail.id);
+        await markEmailAsProcessed(categorizedEmail.id);
 
         return categorizedEmail;
       },
@@ -85,7 +85,7 @@ async function main() {
 
     // Summary
     const jobRelatedCount = categorizedEmails.filter(e => e.category.isJobRelated).length;
-    const stats = getEmailStats();
+    const stats = await getEmailStats();
 
     console.log(`\n--- Summary ---`);
     console.log(`Processed this run: ${categorizedEmails.length}`);

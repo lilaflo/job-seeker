@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Simple web server to display job listings
- * Serves a single-page HTML interface with job data from SQLite
+ * Serves a single-page HTML interface with job data from PostgreSQL
  */
 
 import http from "http";
@@ -90,16 +90,16 @@ function serveStaticFile(filePath: string, res: http.ServerResponse): void {
 /**
  * API endpoint to get jobs with optional filters
  */
-function handleJobsApi(
+async function handleJobsApi(
   req: http.IncomingMessage,
   res: http.ServerResponse
-): void {
+): Promise<void> {
   try {
     const url = new URL(req.url || "/", `http://localhost:${PORT}`);
     const limit = parseInt(url.searchParams.get("limit") || "100", 10);
 
-    const jobs = getJobs({ limit });
-    const stats = getJobStats();
+    const jobs = await getJobs({ limit });
+    const stats = await getJobStats();
 
     res.writeHead(200, {
       "Content-Type": "application/json",
@@ -117,9 +117,9 @@ function handleJobsApi(
 /**
  * API endpoint to get platform statistics
  */
-function handlePlatformsApi(res: http.ServerResponse): void {
+async function handlePlatformsApi(res: http.ServerResponse): Promise<void> {
   try {
-    const platforms = getPlatforms();
+    const platforms = await getPlatforms();
 
     res.writeHead(200, {
       "Content-Type": "application/json",
@@ -137,9 +137,9 @@ function handlePlatformsApi(res: http.ServerResponse): void {
 /**
  * API endpoint to delete a job
  */
-function handleDeleteJobApi(jobId: number, res: http.ServerResponse): void {
+async function handleDeleteJobApi(jobId: number, res: http.ServerResponse): Promise<void> {
   try {
-    const deleted = deleteJob(jobId);
+    const deleted = await deleteJob(jobId);
 
     if (deleted) {
       res.writeHead(200, {
@@ -302,41 +302,23 @@ async function handleSearchApi(
 }
 
 /**
- * API endpoint to reset database (delete and run migrations)
+ * API endpoint to reset database (truncate all tables except blacklist)
  */
 async function handleResetDatabaseApi(res: http.ServerResponse): Promise<void> {
   try {
-    const dbPath = path.join(process.cwd(), "job-seeker.db");
-    const walPath = dbPath + "-wal";
-    const shmPath = dbPath + "-shm";
+    console.debug("Resetting database (preserving blacklist)...");
 
-    // Save blacklist keywords before reset
-    const { getBlacklistKeywords, saveBlacklistKeyword, bufferToEmbedding } = await import("./embeddings");
-    const blacklistKeywords = getBlacklistKeywords();
-    console.debug(`Saving ${blacklistKeywords.length} blacklist keywords before reset`);
+    // Truncate PostgreSQL tables (preserving schema and blacklist)
+    const { query } = await import("./database");
 
-    // Close the database connection first
-    closeDatabase();
+    await query('TRUNCATE TABLE job_embeddings CASCADE');
+    await query('TRUNCATE TABLE job_skill_matches CASCADE');
+    await query('TRUNCATE TABLE jobs CASCADE');
+    await query('TRUNCATE TABLE emails CASCADE');
+    await query('TRUNCATE TABLE logs CASCADE');
+    // Note: blacklist table is NOT truncated - preserved intentionally
 
-    // Delete database files
-    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
-    if (fs.existsSync(walPath)) fs.unlinkSync(walPath);
-    if (fs.existsSync(shmPath)) fs.unlinkSync(shmPath);
-
-    // Run migrations
-    const { stdout, stderr: _stderr } = await execAsync("./migrate.sh");
-
-    // Restore blacklist keywords
-    if (blacklistKeywords.length > 0) {
-      console.debug(`Restoring ${blacklistKeywords.length} blacklist keywords`);
-      for (const kw of blacklistKeywords) {
-        if (kw.embedding) {
-          const embedding = bufferToEmbedding(kw.embedding);
-          saveBlacklistKeyword(kw.keyword, embedding);
-        }
-      }
-      console.debug(`✓ Restored ${blacklistKeywords.length} blacklist keywords`);
-    }
+    console.debug("✓ Database tables truncated (blacklist preserved)");
 
     // Clear all Redis queues
     const redisAvailable = await checkRedisConnection();
@@ -375,9 +357,7 @@ async function handleResetDatabaseApi(res: http.ServerResponse): Promise<void> {
     res.end(
       JSON.stringify({
         success: true,
-        message: `Database reset successfully. Blacklist preserved (${blacklistKeywords.length} keywords). Redis queues cleared.`,
-        output: stdout,
-        blacklistRestored: blacklistKeywords.length,
+        message: "Database reset successfully. Blacklist table preserved. Redis queues cleared.",
       })
     );
   } catch (error) {
@@ -469,8 +449,8 @@ async function handleGenerateEmbeddingsApi(
  */
 async function handleGetBlacklistApi(res: http.ServerResponse): Promise<void> {
   try {
-    const { getBlacklistText } = await import("./embeddings");
-    const text = getBlacklistText();
+    const { getBlacklistText } = await import("./database");
+    const text = await getBlacklistText();
 
     res.writeHead(200, {
       "Content-Type": "application/json",
@@ -690,7 +670,7 @@ async function setupQueueListeners(): Promise<void> {
         console.debug(`Job processing completed: ${job.id}`);
 
         // Fetch the updated job from database
-        const updatedJob = getJobById(result.jobId);
+        const updatedJob = await getJobById(result.jobId);
 
         if (updatedJob) {
           // Check if job was blacklisted
@@ -724,7 +704,7 @@ async function setupQueueListeners(): Promise<void> {
         if (result.jobsExtracted > 0) {
           // Fetch the newly created jobs and broadcast them
           const { getJobs } = await import('./database');
-          const allJobs = getJobs();
+          const allJobs = await getJobs();
 
           // Broadcast that new jobs were added (frontend should refresh)
           broadcast({
@@ -803,6 +783,7 @@ server.listen(PORT, () => {
 process.on("SIGINT", async () => {
   console.log("\nShutting down server...");
   await closePubSub();
+  await closeDatabase();
   server.close(() => {
     console.log("Server closed");
     process.exit(0);
