@@ -3,10 +3,10 @@
  * Provides a singleton client instance and common utilities
  */
 
-import { Ollama } from 'ollama';
+import { Ollama } from "ollama";
 
 // Configuration
-const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
+const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
 
 // Singleton instance
 let ollamaClient: Ollama | null = null;
@@ -37,7 +37,11 @@ export async function checkOllamaAvailability(): Promise<boolean> {
     const response = await client.list();
     return response.models.length > 0;
   } catch (error) {
-    console.debug(`Ollama not available: ${error instanceof Error ? error.message : String(error)}`);
+    console.debug(
+      `Ollama not available: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
     return false;
   }
 }
@@ -51,10 +55,10 @@ export async function getBestModel(): Promise<string> {
   const response = await client.list();
 
   // Extract model names (without tags)
-  const modelNames = response.models.map(m => m.name.split(':')[0]);
+  const modelNames = response.models.map((m) => m.name.split(":")[0]);
 
   // Preference order for models
-  const preferredModels = ['llama3.2', 'llama3.1', 'mistral', 'phi3'];
+  const preferredModels = ["llama3.2", "llama3.1", "mistral", "phi3"];
 
   for (const preferred of preferredModels) {
     if (modelNames.includes(preferred)) {
@@ -64,10 +68,12 @@ export async function getBestModel(): Promise<string> {
 
   // Fallback to first available model
   if (response.models.length > 0) {
-    return response.models[0].name.split(':')[0];
+    return response.models[0].name.split(":")[0];
   }
 
-  throw new Error('No Ollama models found. Please install a model with: ollama pull llama3.2');
+  throw new Error(
+    "No Ollama models found. Please install a model with: ollama pull llama3.2"
+  );
 }
 
 /**
@@ -80,18 +86,25 @@ export async function isModelAvailable(modelName: string): Promise<boolean> {
     const response = await client.list();
 
     // Extract base names from installed models (e.g., "llama3.2" from "llama3.2:latest")
-    const installedBaseNames = response.models.map(m => m.name.split(':')[0]);
+    const installedBaseNames = response.models.map((m) => m.name.split(":")[0]);
 
     // Also get full names for exact matching
-    const installedFullNames = response.models.map(m => m.name);
+    const installedFullNames = response.models.map((m) => m.name);
 
     // Extract base name from the model we're looking for
-    const searchBaseName = modelName.split(':')[0];
+    const searchBaseName = modelName.split(":")[0];
 
     // Check if either the full name or base name matches
-    return installedFullNames.includes(modelName) || installedBaseNames.includes(searchBaseName);
+    return (
+      installedFullNames.includes(modelName) ||
+      installedBaseNames.includes(searchBaseName)
+    );
   } catch (error) {
-    console.debug(`Failed to check model availability: ${error instanceof Error ? error.message : String(error)}`);
+    console.debug(
+      `Failed to check model availability: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
     return false;
   }
 }

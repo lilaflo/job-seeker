@@ -3,13 +3,14 @@
  * Fetches and extracts job description content from web pages
  */
 
-import * as cheerio from 'cheerio';
-import { getOllamaClient } from './ollama-client';
+import * as cheerio from "cheerio";
+import { getOllamaClient } from "./ollama-client";
 
 /**
  * User agent to use for web requests (appears as a legitimate browser)
  */
-const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 /**
  * Fetches HTML content from a URL
@@ -18,14 +19,15 @@ export async function fetchPageHtml(url: string): Promise<string> {
   try {
     const response = await fetch(url, {
       headers: {
-        'User-Agent': USER_AGENT,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9,de;q=0.8',
-        'Accept-Encoding': 'gzip, deflate',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
+        "User-Agent": USER_AGENT,
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9,de;q=0.8",
+        "Accept-Encoding": "gzip, deflate",
+        Connection: "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
       },
-      redirect: 'follow',
+      redirect: "follow",
     });
 
     if (!response.ok) {
@@ -34,7 +36,11 @@ export async function fetchPageHtml(url: string): Promise<string> {
 
     return await response.text();
   } catch (error) {
-    throw new Error(`Failed to fetch ${url}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Failed to fetch ${url}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
   }
 }
 
@@ -43,48 +49,48 @@ export async function fetchPageHtml(url: string): Promise<string> {
  */
 const JOB_DESCRIPTION_SELECTORS = [
   // LinkedIn
-  '.jobs-description__content',
-  '.jobs-description-content__text',
-  '.job-view-layout',
+  ".jobs-description__content",
+  ".jobs-description-content__text",
+  ".job-view-layout",
   // Indeed
-  '#jobDescriptionText',
-  '.jobsearch-jobDescriptionText',
+  "#jobDescriptionText",
+  ".jobsearch-jobDescriptionText",
   // Greenhouse
-  '#content',
-  '.application',
-  '.job-post',
+  "#content",
+  ".application",
+  ".job-post",
   // Lever
-  '.posting-headline',
-  '.posting-description',
+  ".posting-headline",
+  ".posting-description",
   // Workday
-  '.jobDescription',
+  ".jobDescription",
   '[data-automation-id="jobPostingDescription"]',
   // Generic
-  '.job-description',
-  '.job-details',
-  '.description',
-  'article',
+  ".job-description",
+  ".job-details",
+  ".description",
+  "article",
   '[role="main"]',
-  'main',
+  "main",
 ];
 
 /**
  * Elements to remove from job descriptions (noise)
  */
 const NOISE_SELECTORS = [
-  'script',
-  'style',
-  'nav',
-  'header',
-  'footer',
-  '.navigation',
-  '.header',
-  '.footer',
-  '.cookie-banner',
-  '.advertisement',
-  '.social-share',
-  'iframe',
-  'noscript',
+  "script",
+  "style",
+  "nav",
+  "header",
+  "footer",
+  ".navigation",
+  ".header",
+  ".footer",
+  ".cookie-banner",
+  ".advertisement",
+  ".social-share",
+  "iframe",
+  "noscript",
 ];
 
 /**
@@ -94,7 +100,7 @@ export function extractRawJobDescription(html: string): string {
   const $ = cheerio.load(html);
 
   // Remove noise elements
-  NOISE_SELECTORS.forEach(selector => {
+  NOISE_SELECTORS.forEach((selector) => {
     $(selector).remove();
   });
 
@@ -112,14 +118,18 @@ export function extractRawJobDescription(html: string): string {
   }
 
   // Fallback: get all text from body
-  const bodyText = $('body').text();
+  const bodyText = $("body").text();
   return cleanText(bodyText);
 }
 
 /**
  * Uses Ollama to generate a standardized Markdown-formatted job description
  */
-async function generateFormattedDescription(rawText: string, jobTitle: string | null, model: string): Promise<string | null> {
+async function generateFormattedDescription(
+  rawText: string,
+  jobTitle: string | null,
+  model: string
+): Promise<string | null> {
   try {
     const ollama = getOllamaClient();
 
@@ -128,7 +138,7 @@ async function generateFormattedDescription(rawText: string, jobTitle: string | 
 
     const prompt = `You are a job description formatter and translator. Convert the following job posting into a clean, well-structured Markdown document IN ENGLISH.
 
-Job Title: ${jobTitle || 'Not specified'}
+Job Title: ${jobTitle || "Not specified"}
 
 Raw job posting text:
 ${textToAnalyze}
@@ -188,7 +198,9 @@ Example output format for non-English posting (e.g., German):
 
 Now format and translate (if needed) the job posting:`;
 
-    console.debug(`  → Generating formatted description with Ollama (${textToAnalyze.length} chars)...`);
+    console.debug(
+      `  → Generating formatted description with Ollama (${textToAnalyze.length} chars)...`
+    );
 
     const response = await ollama.generate({
       model,
@@ -204,21 +216,26 @@ Now format and translate (if needed) the job posting:`;
 
     // Validate that we got a meaningful response
     if (formattedDescription.length < 100) {
-      console.debug('  ✗ Ollama returned too short a description');
+      console.debug("  ✗ Ollama returned too short a description");
       return null;
     }
 
     // Check if it looks like Markdown with headers
-    if (!formattedDescription.includes('##')) {
-      console.debug('  ✗ Ollama response does not contain Markdown headers');
+    if (!formattedDescription.includes("##")) {
+      console.debug("  ✗ Ollama response does not contain Markdown headers");
       return null;
     }
 
-    console.debug(`  ✓ Generated formatted description (${formattedDescription.length} chars)`);
+    console.debug(
+      `  ✓ Generated formatted description (${formattedDescription.length} chars)`
+    );
     return formattedDescription;
-
   } catch (error) {
-    console.debug(`  ✗ Ollama description formatting error: ${error instanceof Error ? error.message : String(error)}`);
+    console.debug(
+      `  ✗ Ollama description formatting error: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
     return null;
   }
 }
@@ -227,19 +244,29 @@ Now format and translate (if needed) the job posting:`;
  * Extracts job description text from HTML
  * If model is provided, uses Ollama to generate formatted Markdown
  */
-export async function extractJobDescription(html: string, jobTitle: string | null = null, model?: string): Promise<string> {
+export async function extractJobDescription(
+  html: string,
+  jobTitle: string | null = null,
+  model?: string
+): Promise<string> {
   // Extract raw text first
   const rawText = extractRawJobDescription(html);
 
   // If model is provided, try to generate formatted description
   if (model && rawText.length > 200) {
-    console.debug('  → Attempting to generate formatted Markdown description...');
-    const formatted = await generateFormattedDescription(rawText, jobTitle, model);
+    console.debug(
+      "  → Attempting to generate formatted Markdown description..."
+    );
+    const formatted = await generateFormattedDescription(
+      rawText,
+      jobTitle,
+      model
+    );
     if (formatted) {
-      console.debug('  ✓ Using Ollama-formatted Markdown description');
+      console.debug("  ✓ Using Ollama-formatted Markdown description");
       return formatted;
     }
-    console.debug('  ✗ Falling back to raw text');
+    console.debug("  ✗ Falling back to raw text");
   }
 
   // Fallback to raw text
@@ -250,15 +277,17 @@ export async function extractJobDescription(html: string, jobTitle: string | nul
  * Cleans extracted text
  */
 function cleanText(text: string): string {
-  return text
-    // Normalize whitespace
-    .replace(/\s+/g, ' ')
-    // Remove multiple spaces
-    .replace(/  +/g, ' ')
-    // Remove leading/trailing whitespace
-    .trim()
-    // Limit length (for very long pages)
-    .substring(0, 50000); // Max 50k characters for LLM processing
+  return (
+    text
+      // Normalize whitespace
+      .replace(/\s+/g, " ")
+      // Remove multiple spaces
+      .replace(/  +/g, " ")
+      // Remove leading/trailing whitespace
+      .trim()
+      // Limit length (for very long pages)
+      .substring(0, 50000)
+  ); // Max 50k characters for LLM processing
 }
 
 /**
@@ -269,12 +298,12 @@ export function extractJobTitle(html: string): string | null {
 
   // Try common title selectors
   const titleSelectors = [
-    'h1',
-    '.job-title',
-    '.posting-headline',
+    "h1",
+    ".job-title",
+    ".posting-headline",
     '[data-automation-id="jobPostingHeader"]',
-    '.jobsearch-JobInfoHeader-title',
-    'title',
+    ".jobsearch-JobInfoHeader-title",
+    "title",
   ];
 
   for (const selector of titleSelectors) {
@@ -297,20 +326,20 @@ export interface SalaryInfo {
   min: number | null;
   max: number | null;
   currency: string | null;
-  period: 'yearly' | 'monthly' | 'weekly' | 'daily' | 'hourly' | null;
+  period: "yearly" | "monthly" | "weekly" | "daily" | "hourly" | null;
 }
 
 /**
  * Common salary selectors on job pages
  */
 const SALARY_SELECTORS = [
-  '.salary',
-  '.compensation',
-  '.pay',
+  ".salary",
+  ".compensation",
+  ".pay",
   '[class*="salary"]',
   '[class*="compensation"]',
   '[data-automation-id="payRange"]',
-  '.jobsearch-JobMetadataHeader-item',
+  ".jobsearch-JobMetadataHeader-item",
 ];
 
 /**
@@ -328,41 +357,57 @@ function validateSalary(salary: SalaryInfo): boolean {
     const max = salary.max || 0;
 
     // Check for unrealistic values based on period
-    if (salary.period === 'yearly') {
+    if (salary.period === "yearly") {
       // Yearly salaries should be between 20k and 1M
       if (min < 20000 || max > 1000000) {
-        console.debug(`  ✗ Salary validation failed: yearly salary ${min}-${max} out of range (20k-1M)`);
+        console.debug(
+          `  ✗ Salary validation failed: yearly salary ${min}-${max} out of range (20k-1M)`
+        );
         return false;
       }
-    } else if (salary.period === 'monthly') {
+    } else if (salary.period === "monthly") {
       // Monthly salaries should be between 1.5k and 100k
       if (min < 1500 || max > 100000) {
-        console.debug(`  ✗ Salary validation failed: monthly salary ${min}-${max} out of range (1.5k-100k)`);
+        console.debug(
+          `  ✗ Salary validation failed: monthly salary ${min}-${max} out of range (1.5k-100k)`
+        );
         return false;
       }
-    } else if (salary.period === 'hourly') {
+    } else if (salary.period === "hourly") {
       // Hourly rates should be between 10 and 500
       if (min < 10 || max > 500) {
-        console.debug(`  ✗ Salary validation failed: hourly rate ${min}-${max} out of range (10-500)`);
+        console.debug(
+          `  ✗ Salary validation failed: hourly rate ${min}-${max} out of range (10-500)`
+        );
         return false;
       }
     } else {
       // No period specified - assume yearly if value is large enough
       if (min < 100 || max > 1000000) {
-        console.debug(`  ✗ Salary validation failed: salary ${min}-${max} seems unrealistic (no period specified)`);
+        console.debug(
+          `  ✗ Salary validation failed: salary ${min}-${max} seems unrealistic (no period specified)`
+        );
         return false;
       }
     }
 
     // Min should not be greater than max
     if (salary.min !== null && salary.max !== null && salary.min > salary.max) {
-      console.debug(`  ✗ Salary validation failed: min (${min}) > max (${max})`);
+      console.debug(
+        `  ✗ Salary validation failed: min (${min}) > max (${max})`
+      );
       return false;
     }
 
     // Range should not be too extreme (max should not be more than 3x min)
-    if (salary.min !== null && salary.max !== null && salary.max > salary.min * 3) {
-      console.debug(`  ✗ Salary validation failed: range too extreme (max > 3x min)`);
+    if (
+      salary.min !== null &&
+      salary.max !== null &&
+      salary.max > salary.min * 3
+    ) {
+      console.debug(
+        `  ✗ Salary validation failed: range too extreme (max > 3x min)`
+      );
       return false;
     }
   }
@@ -373,7 +418,10 @@ function validateSalary(salary: SalaryInfo): boolean {
 /**
  * Uses Ollama to extract salary information from text
  */
-async function extractSalaryWithOllama(text: string, model: string): Promise<SalaryInfo | null> {
+async function extractSalaryWithOllama(
+  text: string,
+  model: string
+): Promise<SalaryInfo | null> {
   try {
     const ollama = getOllamaClient();
 
@@ -430,12 +478,14 @@ Now analyze the text and return ONLY the JSON object:`;
       },
     });
 
-    console.debug(`  → Ollama response: ${response.response.substring(0, 200)}`);
+    console.debug(
+      `  → Ollama response: ${response.response.substring(0, 200)}`
+    );
 
     // Extract JSON from response
     const jsonMatch = response.response.match(/\{[\s\S]*?\}/);
     if (!jsonMatch) {
-      console.debug('  ✗ Ollama salary extraction: No JSON found in response');
+      console.debug("  ✗ Ollama salary extraction: No JSON found in response");
       return null;
     }
 
@@ -443,8 +493,8 @@ Now analyze the text and return ONLY the JSON object:`;
     console.debug(`  → Parsed salary data: ${JSON.stringify(salaryData)}`);
 
     // Validate the structure
-    if (typeof salaryData !== 'object') {
-      console.debug('  ✗ Ollama salary extraction: Invalid data structure');
+    if (typeof salaryData !== "object") {
+      console.debug("  ✗ Ollama salary extraction: Invalid data structure");
       return null;
     }
 
@@ -457,13 +507,17 @@ Now analyze the text and return ONLY the JSON object:`;
 
     // Validate the salary values
     if (!validateSalary(extractedSalary)) {
-      console.debug('  ✗ Ollama extraction returned invalid salary values');
+      console.debug("  ✗ Ollama extraction returned invalid salary values");
       return null;
     }
 
     return extractedSalary;
   } catch (error) {
-    console.debug(`  ✗ Ollama salary extraction error: ${error instanceof Error ? error.message : String(error)}`);
+    console.debug(
+      `  ✗ Ollama salary extraction error: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
     return null;
   }
 }
@@ -471,48 +525,58 @@ Now analyze the text and return ONLY the JSON object:`;
 /**
  * Extracts salary information from HTML using Ollama (with regex fallback)
  */
-export async function extractSalary(html: string, model?: string): Promise<SalaryInfo> {
+export async function extractSalary(
+  html: string,
+  model?: string
+): Promise<SalaryInfo> {
   const $ = cheerio.load(html);
 
   // Combine text from salary selectors and general content
-  let salaryText = '';
+  let salaryText = "";
 
   // Try specific salary selectors first
   for (const selector of SALARY_SELECTORS) {
     const elements = $(selector);
     elements.each((_, el) => {
-      salaryText += ' ' + $(el).text();
+      salaryText += " " + $(el).text();
     });
   }
 
   // If no salary found in specific selectors, search full text
   if (!salaryText.trim()) {
-    salaryText = $('body').text();
+    salaryText = $("body").text();
   }
 
   // Try Ollama extraction if model is provided
   if (model) {
-    console.debug('  → Extracting salary with Ollama...');
+    console.debug("  → Extracting salary with Ollama...");
     const ollamaSalary = await extractSalaryWithOllama(salaryText, model);
-    if (ollamaSalary && (ollamaSalary.min !== null || ollamaSalary.max !== null)) {
-      console.debug('  ✓ Salary extracted via Ollama');
+    if (
+      ollamaSalary &&
+      (ollamaSalary.min !== null || ollamaSalary.max !== null)
+    ) {
+      console.debug("  ✓ Salary extracted via Ollama");
       return ollamaSalary;
     }
-    console.debug('  ✗ Ollama extraction failed, falling back to regex');
+    console.debug("  ✗ Ollama extraction failed, falling back to regex");
   }
 
   // Fallback to regex-based extraction
-  console.debug('  → Trying regex-based extraction...');
+  console.debug("  → Trying regex-based extraction...");
   const regexSalary = parseSalaryFromText(salaryText);
 
   // Validate regex results
   if (validateSalary(regexSalary)) {
     if (regexSalary.min !== null || regexSalary.max !== null) {
-      console.debug(`  ✓ Regex extracted: ${regexSalary.min}-${regexSalary.max} ${regexSalary.currency} (${regexSalary.period})`);
+      console.debug(
+        `  ✓ Regex extracted: ${regexSalary.min}-${regexSalary.max} ${regexSalary.currency} (${regexSalary.period})`
+      );
     }
     return regexSalary;
   } else {
-    console.debug('  ✗ Regex extraction returned invalid values, returning null');
+    console.debug(
+      "  ✗ Regex extraction returned invalid values, returning null"
+    );
     return { min: null, max: null, currency: null, period: null };
   }
 }
@@ -528,36 +592,52 @@ export async function extractSalary(html: string, model?: string): Promise<Salar
  */
 export function parseSalaryFromText(text: string): SalaryInfo {
   // Common currency symbols and codes
-  const currencies = ['USD', 'EUR', 'CHF', 'GBP', 'CAD', 'AUD', '$', '€', '£', 'Fr.'];
+  const currencies = [
+    "USD",
+    "EUR",
+    "CHF",
+    "GBP",
+    "CAD",
+    "AUD",
+    "$",
+    "€",
+    "£",
+    "Fr.",
+  ];
 
   // Period keywords
-  const periods: Record<string, 'yearly' | 'monthly' | 'weekly' | 'daily' | 'hourly'> = {
-    'year': 'yearly',
-    'yearly': 'yearly',
-    'annual': 'yearly',
-    'pa': 'yearly',
-    'p.a.': 'yearly',
-    'month': 'monthly',
-    'monthly': 'monthly',
-    'week': 'weekly',
-    'weekly': 'weekly',
-    'day': 'daily',
-    'daily': 'daily',
-    'hour': 'hourly',
-    'hourly': 'hourly',
-    '/h': 'hourly',
+  const periods: Record<
+    string,
+    "yearly" | "monthly" | "weekly" | "daily" | "hourly"
+  > = {
+    year: "yearly",
+    yearly: "yearly",
+    annual: "yearly",
+    pa: "yearly",
+    "p.a.": "yearly",
+    month: "monthly",
+    monthly: "monthly",
+    week: "weekly",
+    weekly: "weekly",
+    day: "daily",
+    daily: "daily",
+    hour: "hourly",
+    hourly: "hourly",
+    "/h": "hourly",
   };
 
   // Regex patterns for salary ranges
   // Matches: $80,000 - $120,000 or 80k-120k or €60.000-€80.000 or €80.000,50
   // Note: k/K suffix must come before general number pattern to match first
   // Decimal separator can be dot or comma (followed by 1-2 digits)
-  const rangePattern = /(?:(\$|€|£|CHF|USD|EUR|GBP|Fr\.)\s*)?(\d+(?:k|K)|\d{1,3}(?:[',.\s]\d{3})*(?:[.,]\d{1,2})?)(?:\s*(?:-|to|bis)\s*)(?:(\$|€|£|CHF|USD|EUR|GBP|Fr\.)\s*)?(\d+(?:k|K)|\d{1,3}(?:[',.\s]\d{3})*(?:[.,]\d{1,2})?)/gi;
+  const rangePattern =
+    /(?:(\$|€|£|CHF|USD|EUR|GBP|Fr\.)\s*)?(\d+(?:k|K)|\d{1,3}(?:[',.\s]\d{3})*(?:[.,]\d{1,2})?)(?:\s*(?:-|to|bis)\s*)(?:(\$|€|£|CHF|USD|EUR|GBP|Fr\.)\s*)?(\d+(?:k|K)|\d{1,3}(?:[',.\s]\d{3})*(?:[.,]\d{1,2})?)/gi;
 
   // Single salary pattern
   // Note: k/K suffix must come before general number pattern to match first
   // Decimal separator can be dot or comma (followed by 1-2 digits)
-  const singlePattern = /(?:(\$|€|£|CHF|USD|EUR|GBP|Fr\.)\s*)?(\d+(?:k|K)|\d{1,3}(?:[',.\s]\d{3})*(?:[.,]\d{1,2})?)(?!\s*(?:-|to|bis)\s*\d)/gi;
+  const singlePattern =
+    /(?:(\$|€|£|CHF|USD|EUR|GBP|Fr\.)\s*)?(\d+(?:k|K)|\d{1,3}(?:[',.\s]\d{3})*(?:[.,]\d{1,2})?)(?!\s*(?:-|to|bis)\s*\d)/gi;
 
   let salary: SalaryInfo = {
     min: null,
@@ -622,11 +702,11 @@ export function parseSalaryFromText(text: string): SalaryInfo {
   // Infer period from salary amount if not found
   if (!salary.period && salary.min) {
     if (salary.min < 500) {
-      salary.period = 'hourly';
+      salary.period = "hourly";
     } else if (salary.min < 10000) {
-      salary.period = 'monthly';
+      salary.period = "monthly";
     } else {
-      salary.period = 'yearly';
+      salary.period = "yearly";
     }
   }
 
@@ -650,11 +730,11 @@ function parseNumber(str: string): number | null {
   if (!str) return null;
 
   // Remove spaces
-  str = str.replace(/\s/g, '');
+  str = str.replace(/\s/g, "");
 
   // Handle k/K suffix (thousands)
-  if (str.toLowerCase().endsWith('k')) {
-    const num = parseFloat(str.slice(0, -1).replace(/[',]/g, ''));
+  if (str.toLowerCase().endsWith("k")) {
+    const num = parseFloat(str.slice(0, -1).replace(/[',]/g, ""));
     return isNaN(num) ? null : num * 1000;
   }
 
@@ -664,8 +744,8 @@ function parseNumber(str: string): number | null {
 
   // Detect format based on the position of the last separator relative to string length
   // Decimal separators are followed by 1-2 digits, thousand separators by 3+ digits
-  const lastComma = str.lastIndexOf(',');
-  const lastDot = str.lastIndexOf('.');
+  const lastComma = str.lastIndexOf(",");
+  const lastDot = str.lastIndexOf(".");
   const lastApostrophe = str.lastIndexOf("'");
 
   // Find which separator comes last
@@ -686,15 +766,15 @@ function parseNumber(str: string): number | null {
     // Last separator is likely a decimal separator (1-2 digits after it)
     if (lastComma === lastSeparatorPos) {
       // European: comma is decimal, dots and apostrophes are thousands
-      cleaned = str.replace(/['.]/g, '').replace(',', '.');
+      cleaned = str.replace(/['.]/g, "").replace(",", ".");
     } else {
       // US/Swiss: dot is decimal, commas and apostrophes are thousands
-      cleaned = str.replace(/[',]/g, '');
+      cleaned = str.replace(/[',]/g, "");
     }
   } else {
     // Last separator has 3+ digits after it, so it's a thousand separator
     // This means there's no decimal part, remove all separators
-    cleaned = str.replace(/[',.\s]/g, '');
+    cleaned = str.replace(/[',.\s]/g, "");
   }
 
   const num = parseFloat(cleaned);
@@ -708,16 +788,16 @@ function normalizeCurrency(currency: string | undefined): string | null {
   if (!currency) return null;
 
   const currencyMap: Record<string, string> = {
-    '$': 'USD',
-    '€': 'EUR',
-    '£': 'GBP',
-    'CHF': 'CHF',
-    'Fr.': 'CHF',
-    'USD': 'USD',
-    'EUR': 'EUR',
-    'GBP': 'GBP',
-    'CAD': 'CAD',
-    'AUD': 'AUD',
+    $: "USD",
+    "€": "EUR",
+    "£": "GBP",
+    CHF: "CHF",
+    "Fr.": "CHF",
+    USD: "USD",
+    EUR: "EUR",
+    GBP: "GBP",
+    CAD: "CAD",
+    AUD: "AUD",
   };
 
   return currencyMap[currency.trim()] || currency.trim().toUpperCase();
@@ -729,11 +809,11 @@ function normalizeCurrency(currency: string | undefined): string | null {
 export async function isUrlAccessible(url: string): Promise<boolean> {
   try {
     const response = await fetch(url, {
-      method: 'HEAD',
+      method: "HEAD",
       headers: {
-        'User-Agent': USER_AGENT,
+        "User-Agent": USER_AGENT,
       },
-      redirect: 'follow',
+      redirect: "follow",
     });
     return response.ok;
   } catch {
@@ -744,7 +824,10 @@ export async function isUrlAccessible(url: string): Promise<boolean> {
 /**
  * Scrapes a job page and returns the description
  */
-export async function scrapeJobPage(url: string, model?: string): Promise<{
+export async function scrapeJobPage(
+  url: string,
+  model?: string
+): Promise<{
   description: string;
   title: string | null;
   salary: SalaryInfo;
@@ -766,10 +849,10 @@ export async function scrapeJobPage(url: string, model?: string): Promise<{
 
     if (!description || description.length < 100) {
       return {
-        description: '',
+        description: "",
         title,
         salary,
-        error: 'Could not extract meaningful job description',
+        error: "Could not extract meaningful job description",
       };
     }
 
@@ -781,7 +864,7 @@ export async function scrapeJobPage(url: string, model?: string): Promise<{
     };
   } catch (error) {
     return {
-      description: '',
+      description: "",
       title: null,
       salary: { min: null, max: null, currency: null, period: null },
       error: error instanceof Error ? error.message : String(error),
