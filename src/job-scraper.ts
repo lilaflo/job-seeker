@@ -13,9 +13,51 @@ const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 /**
- * Fetches HTML content from a URL
+ * Abstract API key for web scraping
+ */
+const ABSTRACT_API_KEY = process.env.ABSTRACT_API_KEY_SCRAPE;
+
+/**
+ * Fetches HTML content from a URL using Abstract API scraper
  */
 export async function fetchPageHtml(url: string): Promise<string> {
+  // Use Abstract API if available
+  if (ABSTRACT_API_KEY) {
+    try {
+      // Build Abstract API URL with parameters
+      const params = new URLSearchParams({
+        api_key: ABSTRACT_API_KEY,
+        url: url,
+      });
+      const abstractUrl = `https://scrape.abstractapi.com/v1/?${params.toString()}`;
+
+      const response = await fetch(abstractUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Abstract API HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+      }
+
+      const data = await response.json();
+
+      // Abstract API returns HTML in the response
+      if (data && data.content) {
+        return data.content;
+      } else {
+        throw new Error('Abstract API returned no content');
+      }
+    } catch (error) {
+      console.warn(`Abstract API failed for ${url}, falling back to direct fetch:`, error instanceof Error ? error.message : String(error));
+      // Fall through to direct fetch
+    }
+  }
+
+  // Fallback to direct fetch if Abstract API is not available or failed
   try {
     const response = await fetch(url, {
       headers: {
