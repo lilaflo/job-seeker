@@ -21,8 +21,8 @@ import {
   clearAllEmbeddings,
   getEmbeddingStats,
   type BlacklistKeyword
-} from './database';
-import { getOllamaClient, isModelAvailable } from './ollama-client';
+} from '../database';
+import { getOllamaClient, isModelAvailable } from '../ollama-client';
 
 // Embedding model configuration
 const EMBEDDING_MODEL = process.env.OLLAMA_MODEL_EMBEDDING || 'hf.co/Mungert/all-MiniLM-L6-v2-GGUF';
@@ -224,7 +224,7 @@ export async function updateBlacklistFromText(text: string): Promise<{ count: nu
 
   // Queue embedding generation jobs (async processing)
   console.log(`  → Queueing ${keywords.length} embedding jobs...`);
-  const { enqueueBlacklistEmbeddings, checkRedisConnection } = await import('./queue');
+  const { enqueueBlacklistEmbeddings, checkRedisConnection } = await import('../queue');
 
   const redisAvailable = await checkRedisConnection();
   if (!redisAvailable) {
@@ -270,3 +270,18 @@ export { getJobsWithoutEmbeddings };
  * Export clearAllEmbeddings
  */
 export { clearAllEmbeddings };
+
+/**
+ * Export saveJobEmbedding for tests
+ */
+export { saveJobEmbedding };
+
+/**
+ * Export saveBlacklistKeyword for tests (as saveBlacklistKeywordWithoutEmbedding)
+ */
+export { saveBlacklistKeywordWithoutEmbedding as saveBlacklistKeyword };
+
+/**
+ * Export EMBEDDING_DIM constant
+ */
+export { EMBEDDING_DIM };
