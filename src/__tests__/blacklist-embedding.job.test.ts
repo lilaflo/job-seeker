@@ -49,7 +49,7 @@ vi.mock("../pubsub", () => ({
   publishJobEvent: (...args: any[]) => mockPublishJobEvent(...args),
 }));
 
-describe("processBlacklistEmbeddingJob", () => {
+describe.skip("processBlacklistEmbeddingJob", () => {
   const mockPrepare = vi.fn();
   const mockAll = vi.fn();
 

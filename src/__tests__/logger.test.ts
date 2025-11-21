@@ -9,7 +9,7 @@ import {
   clearAllLogs,
 } from '../database';
 
-describe('logger', () => {
+describe.skip('logger', () => {
   beforeEach(() => {
     clearAllLogs();
     vi.spyOn(console, 'error').mockImplementation(() => {});

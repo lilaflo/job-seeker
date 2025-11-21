@@ -4,9 +4,8 @@
  * Run with: tsx test-embedding.ts
  */
 
-import { Ollama } from 'ollama';
+import { getOllamaClient, getOllamaHost } from './src/ollama-client';
 
-const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
 const TEST_TEXT = 'SAP';
 
 // Try installed embedding models (check ollama list output)
@@ -17,11 +16,11 @@ const EMBEDDING_MODELS = [
 
 async function testEmbedding() {
   console.log('=== Embedding Model Test Script ===\n');
-  console.log(`Ollama Host: ${OLLAMA_HOST}`);
+  console.log(`Ollama Host: ${getOllamaHost()}`);
   console.log(`Test Text: "${TEST_TEXT}"`);
   console.log('');
 
-  const client = new Ollama({ host: OLLAMA_HOST });
+  const client = getOllamaClient();
 
   // Test 1: Check if Ollama is available
   console.log('1. Checking if Ollama is available...');
