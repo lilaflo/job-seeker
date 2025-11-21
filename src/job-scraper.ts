@@ -18,16 +18,63 @@ const USER_AGENT =
 const ABSTRACT_API_KEY = process.env.ABSTRACT_API_KEY_SCRAPE;
 
 /**
+ * Abstract API rate limiting (1 req/s)
+ */
+let lastAbstractApiCall = 0;
+const ABSTRACT_API_RATE_LIMIT_MS = 1000; // 1 request per second
+
+async function waitForAbstractApiRateLimit(): Promise<void> {
+  const now = Date.now();
+  const timeSinceLastCall = now - lastAbstractApiCall;
+
+  if (timeSinceLastCall < ABSTRACT_API_RATE_LIMIT_MS) {
+    const waitTime = ABSTRACT_API_RATE_LIMIT_MS - timeSinceLastCall;
+    console.debug(`Rate limiting: waiting ${waitTime}ms before Abstract API call`);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+
+  lastAbstractApiCall = Date.now();
+}
+
+/**
  * Fetches HTML content from a URL using Abstract API scraper
  */
 export async function fetchPageHtml(url: string): Promise<string> {
+  // For Indeed tracking URLs, follow redirects first to get the actual job page
+  let finalUrl = url;
+  if (url.includes('indeed.com') && url.includes('/clk/') || url.includes('/rc/clk/')) {
+    try {
+      // Follow redirects manually to get the final destination
+      const redirectResponse = await fetch(url, {
+        method: 'HEAD',
+        headers: {
+          "User-Agent": USER_AGENT,
+        },
+        redirect: 'manual',
+      });
+
+      // Get the Location header if this is a redirect
+      const location = redirectResponse.headers.get('Location');
+      if (location) {
+        finalUrl = location.startsWith('http') ? location : new URL(location, url).href;
+        console.debug(`Following Indeed redirect: ${url.substring(0, 80)}... -> ${finalUrl.substring(0, 80)}...`);
+      }
+    } catch (error) {
+      console.debug(`Could not follow Indeed redirect, using original URL:`, error instanceof Error ? error.message : String(error));
+      // Continue with original URL
+    }
+  }
+
   // Use Abstract API if available
   if (ABSTRACT_API_KEY) {
     try {
+      // Wait for rate limit (1 req/s)
+      await waitForAbstractApiRateLimit();
+
       // Build Abstract API URL with parameters
       const params = new URLSearchParams({
         api_key: ABSTRACT_API_KEY,
-        url: url,
+        url: finalUrl,
       });
       const abstractUrl = `https://scrape.abstractapi.com/v1/?${params.toString()}`;
 
@@ -40,7 +87,7 @@ export async function fetchPageHtml(url: string): Promise<string> {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Abstract API HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+        throw new Error(`Abstract API HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
@@ -52,14 +99,16 @@ export async function fetchPageHtml(url: string): Promise<string> {
         throw new Error('Abstract API returned no content');
       }
     } catch (error) {
-      console.warn(`Abstract API failed for ${url}, falling back to direct fetch:`, error instanceof Error ? error.message : String(error));
+      // Don't log the full error text (can be verbose HTML)
+      const errorMsg = error instanceof Error ? error.message.split(' - ')[0] : String(error);
+      console.debug(`Abstract API failed, falling back to direct fetch: ${errorMsg}`);
       // Fall through to direct fetch
     }
   }
 
   // Fallback to direct fetch if Abstract API is not available or failed
   try {
-    const response = await fetch(url, {
+    const response = await fetch(finalUrl, {
       headers: {
         "User-Agent": USER_AGENT,
         Accept:
@@ -79,7 +128,7 @@ export async function fetchPageHtml(url: string): Promise<string> {
     return await response.text();
   } catch (error) {
     throw new Error(
-      `Failed to fetch ${url}: ${
+      `Failed to fetch ${finalUrl}: ${
         error instanceof Error ? error.message : String(error)
       }`
     );
